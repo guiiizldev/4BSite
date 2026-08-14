@@ -38,7 +38,7 @@ Espere a propagação do DNS antes de solicitar o certificado HTTPS.
 
 ```bash
 sudo apt update
-sudo apt install -y nginx git curl certbot python3-certbot-nginx
+sudo apt install -y nginx git curl certbot python3-certbot-nginx build-essential python3
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
 sudo mkdir -p /var/www/4byts
