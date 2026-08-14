@@ -27,7 +27,7 @@ Os módulos fiscal NFC-e/NF-e e pagamentos integrados permanecem em desenvolvime
 
 ## Licenciamento
 
-O cadastro de uma empresa exige uma chave ativa e vinculada a um cliente no painel 4Byts. O navegador nunca recebe o segredo da integração: a API do PDV se comunica diretamente com a central, armazena somente o token de ativação criptografado e renova a validação periodicamente.
+O cadastro de uma empresa exige uma chave ativa e vinculada a um cliente no painel 4Byts. O navegador nunca recebe o segredo da integração: a API do PDV se comunica diretamente com a central, armazena somente o token de ativação criptografado e renova a validação periodicamente. O administrador pode liberar uma instalação remotamente; o token deixa de funcionar e a liberação permanece no histórico da licença.
 
 Para habilitar o fluxo comercial, configure a API .NET por variáveis de ambiente:
 

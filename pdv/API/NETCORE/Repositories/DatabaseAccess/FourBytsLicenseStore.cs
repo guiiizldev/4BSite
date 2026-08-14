@@ -66,6 +66,17 @@ public sealed class FourBytsLicenseStore(Connection connection, HorusSecretProte
         command.ExecuteNonQuery();
     }
 
+    public void MarkActivationInvalid(string companyId)
+    {
+        if (!options.Enabled) return;
+        using var db = connection.OpenConnection();
+        using var command = new SqlCommand(
+            "UPDATE Licencas4Byts SET Status = N'activation_removed', GraceUntil = SYSUTCDATETIME(), UpdatedAt = SYSUTCDATETIME() WHERE CompanyId = @CompanyId;",
+            db);
+        command.Parameters.AddWithValue("@CompanyId", companyId);
+        command.ExecuteNonQuery();
+    }
+
     private void AddLicenseParameters(SqlCommand command, string companyId, CentralLicenseDto license, string token, DateTimeOffset now)
     {
         command.Parameters.AddWithValue("@CompanyId", companyId);

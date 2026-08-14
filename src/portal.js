@@ -98,6 +98,7 @@ function authScreen(mode = 'login') {
 
 const statusLabel = status => ({ active: 'Ativa', suspended: 'Suspensa', expired: 'Expirada', revoked: 'Revogada' }[status] || status);
 const formatDate = value => value ? new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value)) : 'Sem vencimento';
+const formatDateTime = value => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(`${value}${value.endsWith('Z') || value.includes('+') ? '' : 'Z'}`)) : '—';
 
 function licenseCard(license) {
   return `
@@ -156,6 +157,32 @@ function licenseForm(license = {}, users = []) {
   </form>`;
 }
 
+function deviceListContent(license, devices) {
+  return `<div class="device-modal-summary">
+      <div><small>Licença</small><b>${escapeHtml(license.license_key)}</b></div>
+      <div><small>Produto</small><b>${escapeHtml(license.product)}</b></div>
+      <div><small>Limite</small><b>${license.max_devices} instalação(ões)</b></div>
+    </div>
+    <div id="deviceModalMessage" class="portal-message" hidden></div>
+    <div class="device-list">
+      ${devices.length ? devices.map(device => `
+        <article class="device-item ${device.released_at ? 'released' : ''}">
+          <div class="device-item-main">
+            <div class="device-status-dot"></div>
+            <div><b>${escapeHtml(device.device_name || 'Instalação sem nome')}</b><small>${escapeHtml(device.company_document || 'CNPJ não informado')} · ${escapeHtml(device.device_id)}</small></div>
+          </div>
+          <div class="device-details">
+            <span><small>Último acesso</small><b>${escapeHtml(formatDateTime(device.last_seen_at))}</b></span>
+            <span><small>IP mais recente</small><b>${escapeHtml(device.last_ip || '—')}</b></span>
+          </div>
+          ${device.released_at
+            ? `<p class="device-released">Liberada em ${escapeHtml(formatDateTime(device.released_at))}${device.released_by_name ? ` por ${escapeHtml(device.released_by_name)}` : ''}</p>`
+            : `<button class="device-release" data-release-device="${device.id}" type="button">Liberar instalação</button>`}
+        </article>`).join('')
+        : '<div class="admin-empty">Nenhuma instalação registrada nesta licença.</div>'}
+    </div>`;
+}
+
 async function adminDashboard(admin) {
   root.innerHTML = spinner();
   try {
@@ -175,7 +202,7 @@ async function adminDashboard(admin) {
             <div class="customer-welcome"><div><span class="portal-kicker">ADMINISTRAÇÃO</span><h1>Visão geral</h1><p>Gerencie clientes e licenças em um só lugar.</p></div><div class="admin-actions"><button id="newUser" class="portal-secondary">+ Criar cliente</button><button id="newLicense" class="portal-primary compact">+ Gerar licença</button></div></div>
             <div class="customer-metrics"><article><span>Clientes</span><strong>${customerCount}</strong><small>contas cadastradas</small></article><article><span>Licenças ativas</span><strong>${activeLicenses}</strong><small>de ${licenses.length} licenças</small></article><article><span>Administradores</span><strong>${users.length - customerCount}</strong><small>acesso geral</small></article></div>
             <section class="admin-section"><div class="licenses-heading"><div><h2>Clientes e contas</h2><p>Crie contas, altere dados, permissões e senhas.</p></div></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Cliente</th><th>Empresa</th><th>Permissão</th><th>Licenças</th><th></th></tr></thead><tbody>${users.map(user => `<tr><td><b>${escapeHtml(user.name)}</b><small>${escapeHtml(user.email)}</small></td><td>${escapeHtml(user.company || '—')}</td><td><span class="admin-role ${user.role}">${user.role === 'admin' ? 'Administrador' : 'Cliente'}</span></td><td>${user.license_count}</td><td><button class="admin-edit" data-edit-user="${user.id}">Editar</button></td></tr>`).join('')}</tbody></table></div></section>
-            <section class="admin-section"><div class="licenses-heading"><div><h2>Licenças</h2><p>Emita, atribua, suspenda ou atualize licenças.</p></div></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Chave</th><th>Cliente</th><th>Produto / plano</th><th>Status</th><th></th></tr></thead><tbody>${licenses.length ? licenses.map(license => `<tr><td><b class="license-key-cell">${escapeHtml(license.license_key)}</b></td><td>${license.customer_name ? `<b>${escapeHtml(license.customer_name)}</b><small>${escapeHtml(license.customer_email)}</small>` : '<span class="unassigned">Sem vínculo</span>'}</td><td><b>${escapeHtml(license.product)}</b><small>${escapeHtml(license.plan)} · ${license.max_devices} dispositivo(s)</small></td><td><span class="license-status ${escapeHtml(license.status)}">● ${escapeHtml(statusLabel(license.status))}</span></td><td><button class="admin-edit" data-edit-license="${license.id}">Editar</button></td></tr>`).join('') : '<tr><td colspan="5" class="admin-empty">Nenhuma licença emitida.</td></tr>'}</tbody></table></div></section>
+            <section class="admin-section"><div class="licenses-heading"><div><h2>Licenças</h2><p>Emita, atribua, suspenda ou atualize licenças.</p></div></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Chave</th><th>Cliente</th><th>Produto / plano</th><th>Status</th><th></th></tr></thead><tbody>${licenses.length ? licenses.map(license => `<tr><td><b class="license-key-cell">${escapeHtml(license.license_key)}</b></td><td>${license.customer_name ? `<b>${escapeHtml(license.customer_name)}</b><small>${escapeHtml(license.customer_email)}</small>` : '<span class="unassigned">Sem vínculo</span>'}</td><td><b>${escapeHtml(license.product)}</b><small>${escapeHtml(license.plan)} · ${license.max_devices} dispositivo(s)</small></td><td><span class="license-status ${escapeHtml(license.status)}">● ${escapeHtml(statusLabel(license.status))}</span></td><td><div class="admin-row-actions"><button class="admin-edit" data-devices-license="${license.id}">Instalações (${license.device_count || 0})</button><button class="admin-edit" data-edit-license="${license.id}">Editar</button></div></td></tr>`).join('') : '<tr><td colspan="5" class="admin-empty">Nenhuma licença emitida.</td></tr>'}</tbody></table></div></section>
           </div>
         </main>
       </div>`;
@@ -198,10 +225,36 @@ async function adminDashboard(admin) {
         try { const result = await api(license?.id ? `/api/admin/licenses/${license.id}` : '/api/admin/licenses', { method: license?.id ? 'PATCH' : 'POST', body: JSON.stringify(values) }); if (result.key) alert(`Licença criada: ${result.key}`); modal.remove(); await adminDashboard(admin); } catch (error) { showMessage(message, error.message); }
       });
     };
+    const openDevices = async license => {
+      const modal = adminModal('Instalações da licença', '<div class="portal-loading compact-loading"><i></i><span>Consultando instalações...</span></div>');
+      try {
+        const result = await api(`/api/admin/licenses/${license.id}/devices`);
+        const card = modal.querySelector('.admin-modal-card');
+        card.querySelector(':scope > h2').insertAdjacentHTML('afterend', deviceListContent(result.license, result.devices));
+        card.querySelector('.compact-loading').remove();
+        card.querySelectorAll('[data-release-device]').forEach(button => button.addEventListener('click', async () => {
+          const device = result.devices.find(item => item.id === Number(button.dataset.releaseDevice));
+          if (!confirm(`Liberar a instalação "${device?.device_name || 'sem nome'}"? O PDV perderá o acesso na próxima validação.`)) return;
+          const message = card.querySelector('#deviceModalMessage');
+          button.disabled = true;
+          try {
+            const released = await api(`/api/admin/licenses/${license.id}/devices/${device.id}/release`, { method: 'PATCH' });
+            showMessage(message, released.message, 'success');
+            setTimeout(() => { modal.remove(); adminDashboard(admin); }, 900);
+          } catch (error) {
+            showMessage(message, error.message);
+            button.disabled = false;
+          }
+        }));
+      } catch (error) {
+        modal.querySelector('.compact-loading').innerHTML = `<span>${escapeHtml(error.message)}</span>`;
+      }
+    };
     document.querySelector('#newUser').addEventListener('click', () => openUser());
     document.querySelector('#newLicense').addEventListener('click', () => openLicense());
     document.querySelectorAll('[data-edit-user]').forEach(button => button.addEventListener('click', () => openUser(users.find(user => user.id === Number(button.dataset.editUser)))));
     document.querySelectorAll('[data-edit-license]').forEach(button => button.addEventListener('click', () => openLicense(licenses.find(license => license.id === Number(button.dataset.editLicense)))));
+    document.querySelectorAll('[data-devices-license]').forEach(button => button.addEventListener('click', () => openDevices(licenses.find(license => license.id === Number(button.dataset.devicesLicense)))));
   } catch (error) {
     root.innerHTML = `<div class="portal-fatal"><h1>Não foi possível abrir a administração</h1><p>${escapeHtml(error.message)}</p><button onclick="location.reload()">Tentar novamente</button></div>`;
   }

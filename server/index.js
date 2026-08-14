@@ -150,8 +150,8 @@ app.post('/api/v1/licenses/activate', activationLimiter, requireLicenseService, 
   if (!license.product.toLowerCase().includes('pdv')) return response.status(409).json({ error: 'Esta licença não pertence ao 4Byts PDV.' });
 
   const existing = db.prepare('SELECT * FROM devices WHERE license_id = ? AND device_id = ?').get(license.id, parsed.data.instanceId);
-  const activeDevices = db.prepare('SELECT COUNT(*) AS count FROM devices WHERE license_id = ?').get(license.id).count;
-  if (!existing && activeDevices >= license.max_devices) {
+  const activeDevices = db.prepare('SELECT COUNT(*) AS count FROM devices WHERE license_id = ? AND released_at IS NULL').get(license.id).count;
+  if ((!existing || existing.released_at) && activeDevices >= license.max_devices) {
     return response.status(409).json({ error: 'Limite de instalações atingido para esta licença.' });
   }
 
@@ -160,7 +160,7 @@ app.post('/api/v1/licenses/activate', activationLimiter, requireLicenseService, 
   if (existing) {
     db.prepare(`
       UPDATE devices SET device_name = ?, company_document = ?, activation_token_hash = ?,
-        last_seen_at = datetime('now'), last_ip = ? WHERE id = ?
+        last_seen_at = datetime('now'), activated_at = datetime('now'), last_ip = ?, released_at = NULL, released_by = NULL WHERE id = ?
     `).run(parsed.data.companyName, parsed.data.companyDocument, tokenHash, request.ip, existing.id);
   } else {
     db.prepare(`
@@ -178,7 +178,7 @@ app.post('/api/v1/licenses/validate', activationLimiter, requireLicenseService, 
   const device = db.prepare(`
     SELECT devices.id AS device_row_id, devices.device_id, devices.company_document, licenses.*
     FROM devices JOIN licenses ON licenses.id = devices.license_id
-    WHERE devices.activation_token_hash = ?
+    WHERE devices.activation_token_hash = ? AND devices.released_at IS NULL
   `).get(hashActivationToken(parsed.data.activationToken));
   if (!device) return response.status(401).json({ valid: false, error: 'Ativação não encontrada.' });
   const status = effectiveLicenseStatus(device);
@@ -227,7 +227,7 @@ app.get('/api/auth/me', requireAuth, (request, response) => {
 app.get('/api/licenses', requireAuth, (request, response) => {
   const licenses = db.prepare(`
     SELECT licenses.*,
-      (SELECT COUNT(*) FROM devices WHERE devices.license_id = licenses.id) AS device_count
+      (SELECT COUNT(*) FROM devices WHERE devices.license_id = licenses.id AND devices.released_at IS NULL) AS device_count
     FROM licenses WHERE user_id = ? ORDER BY created_at DESC
   `).all(request.user.id).map(license => ({
     id: license.id,
@@ -298,10 +298,41 @@ app.patch('/api/admin/users/:id', requireAuth, requireAdmin, async (request, res
 
 app.get('/api/admin/licenses', requireAuth, requireAdmin, (_request, response) => {
   const licenses = db.prepare(`
-    SELECT licenses.*, users.name AS customer_name, users.email AS customer_email
+    SELECT licenses.*, users.name AS customer_name, users.email AS customer_email,
+      (SELECT COUNT(*) FROM devices WHERE devices.license_id = licenses.id AND devices.released_at IS NULL) AS device_count
     FROM licenses LEFT JOIN users ON users.id = licenses.user_id ORDER BY licenses.created_at DESC
   `).all();
   response.json({ licenses });
+});
+
+app.get('/api/admin/licenses/:id/devices', requireAuth, requireAdmin, (request, response) => {
+  const licenseId = Number(request.params.id);
+  if (!Number.isSafeInteger(licenseId)) return response.status(400).json({ error: 'Licença inválida.' });
+  const license = db.prepare('SELECT id, license_key, product, max_devices FROM licenses WHERE id = ?').get(licenseId);
+  if (!license) return response.status(404).json({ error: 'Licença não encontrada.' });
+  const devices = db.prepare(`
+    SELECT devices.id, devices.device_id, devices.device_name, devices.company_document,
+      devices.last_seen_at, devices.activated_at, devices.last_ip, devices.released_at,
+      users.name AS released_by_name
+    FROM devices LEFT JOIN users ON users.id = devices.released_by
+    WHERE devices.license_id = ?
+    ORDER BY devices.released_at IS NULL DESC, devices.last_seen_at DESC
+  `).all(licenseId);
+  response.json({ license, devices });
+});
+
+app.patch('/api/admin/licenses/:licenseId/devices/:deviceId/release', requireAuth, requireAdmin, (request, response) => {
+  const licenseId = Number(request.params.licenseId);
+  const deviceId = Number(request.params.deviceId);
+  if (!Number.isSafeInteger(licenseId) || !Number.isSafeInteger(deviceId)) {
+    return response.status(400).json({ error: 'Instalação inválida.' });
+  }
+  const result = db.prepare(`
+    UPDATE devices SET activation_token_hash = NULL, released_at = datetime('now'), released_by = ?
+    WHERE id = ? AND license_id = ? AND released_at IS NULL
+  `).run(request.user.id, deviceId, licenseId);
+  if (!result.changes) return response.status(404).json({ error: 'Instalação ativa não encontrada.' });
+  response.json({ message: 'Instalação liberada. Uma nova ativação já pode ser realizada.' });
 });
 
 app.post('/api/admin/licenses', requireAuth, requireAdmin, (request, response) => {

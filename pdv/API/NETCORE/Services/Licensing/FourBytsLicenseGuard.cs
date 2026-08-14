@@ -16,7 +16,13 @@ public sealed class FourBytsLicenseGuard(
         var now = DateTimeOffset.UtcNow;
         if (local.Status == "active" && local.ExpiresAt is not null && local.ExpiresAt <= now)
             return LicenseAccessResult.Denied("A licença 4Byts está vencida.");
-        if (local.Status != "active") return LicenseAccessResult.Denied($"A licença 4Byts está {local.Status}.");
+        if (local.Status != "active")
+        {
+            var message = local.Status == "activation_removed"
+                ? "Esta instalação foi liberada pelo administrador. Ative o PDV novamente."
+                : $"A licença 4Byts está {local.Status}.";
+            return LicenseAccessResult.Denied(message);
+        }
         if (local.LastValidatedAt.AddMinutes(options.ValidationMinutes) > now)
             return LicenseAccessResult.Allowed(local.Plan);
 
@@ -30,7 +36,10 @@ public sealed class FourBytsLicenseGuard(
                 store.SaveValidation(companyId, validation.License);
             }
             if (!validation.Valid || validation.License is null)
+            {
+                if (validation.License is null) store.MarkActivationInvalid(companyId);
                 return LicenseAccessResult.Denied(validation.Error);
+            }
             return LicenseAccessResult.Allowed(validation.License.Plan);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
