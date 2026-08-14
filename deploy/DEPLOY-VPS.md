@@ -26,10 +26,8 @@ sudo chown -R "$USER":"$USER" /var/www/4byts
 
 ## 3. Baixe e compile o site
 
-Troque `USUARIO_GITHUB` pelo usuário ou organização que contém o repositório.
-
 ```bash
-git clone https://github.com/USUARIO_GITHUB/4BSite.git /var/www/4byts
+git clone https://github.com/guiiizldev/4BSite.git /var/www/4byts
 cd /var/www/4byts
 npm ci
 npm run build
