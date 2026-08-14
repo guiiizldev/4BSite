@@ -25,6 +25,8 @@ npm run build
 - Banco próprio da 4Byts para clientes, licenças e dispositivos
 - Consulta e vínculo de licenças por chave
 - Painel administrativo para clientes, permissões e licenças
+- API de ativação e validação de licenças para os produtos 4Byts
+- Integração do 4Byts PDV com licença vinculada ao CNPJ e token criptografado
 - Apresentação do fluxo de licenciamento
 - Menu mobile, modais, feedbacks e animações
 - Base inicial do 4Byts PDV em `pdv/`
@@ -38,7 +40,7 @@ O diretório `pdv/` contém a evolução comercial do sistema de frente de caixa
 Os preços e pagamentos ainda são demonstrativos. A autenticação e a base de licenças já possuem backend próprio. As próximas fases devem conectar:
 
 - gateway de pagamento e assinaturas;
-- ativação do 4Byts PDV pela central de licenças;
-- auditoria de segurança e isolamento multiempresa;
+- gestão de dispositivos e liberação remota de ativações;
+- ampliação dos testes de segurança e isolamento multiempresa;
 - envio de leads por WhatsApp, e-mail ou CRM;
 - recuperação de senha por e-mail e verificação de conta.

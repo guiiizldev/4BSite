@@ -3,7 +3,7 @@ import cookieParser from 'cookie-parser';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { clearSessionCookie, createSession, destroySession, publicUser, requireAdmin, requireAuth, setSessionCookie } from './auth.js';
 import { cleanupExpiredSessions, db } from './db.js';
@@ -41,6 +41,59 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Muitas tentativas. Aguarde alguns minutos.' }
 });
+
+const activationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Limite de validações excedido. Tente novamente em instantes.' }
+});
+
+const hashActivationToken = token => createHash('sha256').update(token).digest('hex');
+const digitsOnly = value => String(value || '').replace(/\D/g, '');
+
+function requireLicenseService(request, response, next) {
+  const expected = process.env.LICENSE_SERVICE_API_KEY || '';
+  const received = request.get('x-4byts-service-key') || '';
+  if (!expected || expected.length < 32) return response.status(503).json({ error: 'Serviço de licenças não configurado.' });
+  const expectedBuffer = Buffer.from(expected);
+  const receivedBuffer = Buffer.from(received);
+  if (expectedBuffer.length !== receivedBuffer.length || !timingSafeEqual(expectedBuffer, receivedBuffer)) {
+    return response.status(401).json({ error: 'Credencial de serviço inválida.' });
+  }
+  next();
+}
+
+const activationSchema = z.object({
+  licenseKey: z.string().trim().min(8).max(100).transform(value => value.toUpperCase()),
+  instanceId: z.string().trim().min(8).max(120),
+  companyName: z.string().trim().min(2).max(160),
+  companyDocument: z.string().transform(digitsOnly).refine(value => value.length === 14)
+});
+
+const validationSchema = z.object({
+  activationToken: z.string().trim().min(32).max(200)
+});
+
+function licenseEntitlement(license) {
+  return {
+    id: license.id,
+    product: license.product,
+    plan: license.plan,
+    status: license.status,
+    maxDevices: license.max_devices,
+    expiresAt: license.expires_at
+  };
+}
+
+function effectiveLicenseStatus(license) {
+  if (license.status === 'active' && license.expires_at && new Date(license.expires_at).getTime() <= Date.now()) {
+    db.prepare("UPDATE licenses SET status = 'expired' WHERE id = ?").run(license.id);
+    return 'expired';
+  }
+  return license.status;
+}
 
 const registerSchema = z.object({
   name: z.string().trim().min(2).max(100),
@@ -85,6 +138,53 @@ const adminLicenseUpdateSchema = z.object({
 
 app.get('/api/health', (_request, response) => {
   response.json({ status: 'ok', service: '4byts-api', time: new Date().toISOString() });
+});
+
+app.post('/api/v1/licenses/activate', activationLimiter, requireLicenseService, (request, response) => {
+  const parsed = activationSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ error: 'Dados de ativação inválidos.' });
+  const license = db.prepare('SELECT * FROM licenses WHERE license_key = ?').get(parsed.data.licenseKey);
+  if (!license || !license.user_id) return response.status(404).json({ error: 'Licença não encontrada ou ainda não vinculada a um cliente.' });
+  const status = effectiveLicenseStatus(license);
+  if (status !== 'active') return response.status(403).json({ error: `Licença ${status}.`, status });
+  if (!license.product.toLowerCase().includes('pdv')) return response.status(409).json({ error: 'Esta licença não pertence ao 4Byts PDV.' });
+
+  const existing = db.prepare('SELECT * FROM devices WHERE license_id = ? AND device_id = ?').get(license.id, parsed.data.instanceId);
+  const activeDevices = db.prepare('SELECT COUNT(*) AS count FROM devices WHERE license_id = ?').get(license.id).count;
+  if (!existing && activeDevices >= license.max_devices) {
+    return response.status(409).json({ error: 'Limite de instalações atingido para esta licença.' });
+  }
+
+  const activationToken = randomBytes(48).toString('base64url');
+  const tokenHash = hashActivationToken(activationToken);
+  if (existing) {
+    db.prepare(`
+      UPDATE devices SET device_name = ?, company_document = ?, activation_token_hash = ?,
+        last_seen_at = datetime('now'), last_ip = ? WHERE id = ?
+    `).run(parsed.data.companyName, parsed.data.companyDocument, tokenHash, request.ip, existing.id);
+  } else {
+    db.prepare(`
+      INSERT INTO devices (license_id, device_id, device_name, company_document, activation_token_hash, last_ip)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(license.id, parsed.data.instanceId, parsed.data.companyName, parsed.data.companyDocument, tokenHash, request.ip);
+  }
+  db.prepare("UPDATE licenses SET activated_at = COALESCE(activated_at, datetime('now')) WHERE id = ?").run(license.id);
+  response.status(existing ? 200 : 201).json({ activationToken, license: licenseEntitlement({ ...license, status }) });
+});
+
+app.post('/api/v1/licenses/validate', activationLimiter, requireLicenseService, (request, response) => {
+  const parsed = validationSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ error: 'Token de ativação inválido.' });
+  const device = db.prepare(`
+    SELECT devices.id AS device_row_id, devices.device_id, devices.company_document, licenses.*
+    FROM devices JOIN licenses ON licenses.id = devices.license_id
+    WHERE devices.activation_token_hash = ?
+  `).get(hashActivationToken(parsed.data.activationToken));
+  if (!device) return response.status(401).json({ valid: false, error: 'Ativação não encontrada.' });
+  const status = effectiveLicenseStatus(device);
+  db.prepare("UPDATE devices SET last_seen_at = datetime('now'), last_ip = ? WHERE id = ?").run(request.ip, device.device_row_id);
+  if (status !== 'active') return response.status(403).json({ valid: false, status, license: licenseEntitlement({ ...device, status }) });
+  response.json({ valid: true, license: licenseEntitlement({ ...device, status }) });
 });
 
 app.post('/api/auth/register', authLimiter, async (request, response) => {

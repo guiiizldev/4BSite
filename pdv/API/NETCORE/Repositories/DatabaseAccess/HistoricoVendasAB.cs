@@ -198,13 +198,14 @@ public class HistoricoVendasAB(Connection connection)
                 UPDATE Produtos
                    SET ProductQnt = @ProductQnt,
                        TotalPriceOnProduct = @TotalPriceOnProduct
-                 WHERE Id = @Id;
+                 WHERE Id = @Id AND CompanyId = @CompanyId;
                 """,
                 db,
                 transaction);
             update.Parameters.AddWithValue("@ProductQnt", nextStock.ToString());
             update.Parameters.AddWithValue("@TotalPriceOnProduct", CalculateTotal(unitPrice, nextStock));
             update.Parameters.AddWithValue("@Id", productId);
+            update.Parameters.AddWithValue("@CompanyId", companyId);
             await update.ExecuteNonQueryAsync();
         }
 
@@ -246,7 +247,8 @@ public class HistoricoVendasAB(Connection connection)
             UPDATE i
                SET UnitPrice = COALESCE(NULLIF(LTRIM(RTRIM(p.ProductSalePrice)), ''), NULLIF(LTRIM(RTRIM(p.ProductUnitPrice)), ''), N'0,00')
               FROM VendaItens i
-              INNER JOIN Produtos p ON p.ProductCode = i.ProductCode
+              INNER JOIN Vendas v ON v.Id = i.VendaId
+              INNER JOIN Produtos p ON p.CompanyId = v.CompanyId AND p.ProductCode = i.ProductCode
              WHERE NULLIF(LTRIM(RTRIM(i.UnitPrice)), '') IS NULL
                 OR REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(i.UnitPrice)), N'R$', N''), N'.', N''), N',', N'.') IN (N'0', N'0.00');
 

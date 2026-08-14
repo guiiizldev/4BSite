@@ -11,6 +11,7 @@ Environment=NODE_ENV=production
 Environment=HOST=127.0.0.1
 Environment=PORT=4310
 Environment=DATABASE_PATH=/var/lib/4byts/4byts.db
+EnvironmentFile=-/etc/4byts/4byts-api.env
 ExecStart=/usr/bin/node /var/www/4byts/server/index.js
 Restart=on-failure
 RestartSec=5

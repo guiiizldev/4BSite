@@ -3,7 +3,7 @@
  * Objetivo: renderiza cadastro público da empresa e usuário administrador inicial.
  * Entradas esperadas: recebe callbacks de navegação; envia dados validados, máscaras e reCAPTCHA para a API.
  */
-import { Building2, Phone, User, UserPlus } from "lucide-react";
+import { Building2, KeyRound, Phone, User, UserPlus } from "lucide-react";
 import { useState } from "react";
 import LoadingButton from "@/components/Loading/LoadingButton";
 import useRecaptchaV3 from "@/hooks/Security/useRecaptchaV3";
@@ -20,6 +20,7 @@ const initialRegisterForm: RegisterFormPayload = {
   phone: "",
   password: "",
   confirmPassword: "",
+  licenseKey: "",
 };
 
 type RegisterPageProps = {
@@ -43,10 +44,10 @@ export default function RegisterPage({
   const [feedback, setFeedback] = useState<AuthActionResult | null>(null);
 
   const handleSubmit = async () => {
-    if (!form.name.trim() || !form.email.trim() || !form.cnpj.trim() || !form.password.trim()) {
+    if (!form.name.trim() || !form.email.trim() || !form.cnpj.trim() || !form.password.trim() || !form.licenseKey.trim()) {
       setFeedback({
         success: false,
-        message: "Preencha nome da empresa, CNPJ, e-mail e senha.",
+        message: "Preencha nome da empresa, CNPJ, e-mail, senha e licença 4Byts.",
       });
       return;
     }
@@ -156,6 +157,21 @@ export default function RegisterPage({
         onChange={(value) => setField("email", value)}
         onEnter={handleSubmit}
       />
+      <label className="block">
+        <span className="mb-1 block text-sm font-semibold text-text-primary">Licença 4Byts</span>
+        <div className="relative">
+          <KeyRound size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-text-tertiary" />
+          <input
+            type="text"
+            className="input-field w-full pl-10 font-mono uppercase"
+            value={form.licenseKey}
+            onChange={(event) => setField("licenseKey", event.target.value.toUpperCase())}
+            placeholder="4B-PDV-XXXXXX-XXXXXX"
+            autoComplete="off"
+          />
+        </div>
+        <p className="mt-1 text-xs text-text-tertiary">Encontre sua chave no painel do cliente em 4byts.com.</p>
+      </label>
       <PasswordField
         label="Senha"
         value={form.password}

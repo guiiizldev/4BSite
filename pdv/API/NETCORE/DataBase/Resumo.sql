@@ -141,6 +141,25 @@ BEGIN
     ALTER TABLE Empresas ADD EmailSmtpReplyTo NVARCHAR(180) NOT NULL CONSTRAINT DF_Empresas_EmailSmtpReplyTo DEFAULT N'';
 END;
 
+IF OBJECT_ID(N'Licencas4Byts', N'U') IS NULL
+BEGIN
+    CREATE TABLE Licencas4Byts
+    (
+        CompanyId NVARCHAR(40) NOT NULL CONSTRAINT PK_Licencas4Byts PRIMARY KEY,
+        LicenseId INT NOT NULL,
+        Product NVARCHAR(100) NOT NULL,
+        PlanName NVARCHAR(80) NOT NULL,
+        Status NVARCHAR(30) NOT NULL,
+        MaxDevices INT NOT NULL CONSTRAINT DF_Licencas4Byts_MaxDevices DEFAULT 1,
+        ExpiresAt DATETIMEOFFSET NULL,
+        ActivationTokenEncrypted NVARCHAR(1000) NOT NULL,
+        LastValidatedAt DATETIMEOFFSET NOT NULL,
+        GraceUntil DATETIMEOFFSET NOT NULL,
+        UpdatedAt DATETIMEOFFSET NOT NULL CONSTRAINT DF_Licencas4Byts_UpdatedAt DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT FK_Licencas4Byts_Empresas FOREIGN KEY (CompanyId) REFERENCES Empresas (Id) ON DELETE CASCADE
+    );
+END;
+
 GO
 
 USE HorusPdv;
@@ -303,7 +322,8 @@ GO
 UPDATE i
    SET UnitPrice = COALESCE(NULLIF(LTRIM(RTRIM(p.ProductSalePrice)), ''), NULLIF(LTRIM(RTRIM(p.ProductUnitPrice)), ''), N'0,00')
   FROM VendaItens i
-  INNER JOIN Produtos p ON p.ProductCode = i.ProductCode
+  INNER JOIN Vendas v ON v.Id = i.VendaId
+  INNER JOIN Produtos p ON p.CompanyId = v.CompanyId AND p.ProductCode = i.ProductCode
  WHERE NULLIF(LTRIM(RTRIM(i.UnitPrice)), '') IS NULL
     OR REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(i.UnitPrice)), N'R$', N''), N'.', N''), N',', N'.') IN (N'0', N'0.00');
 

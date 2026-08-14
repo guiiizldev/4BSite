@@ -10,6 +10,7 @@ using HORUSPDV_API.Services.Caixa;
 using HORUSPDV_API.Services.Clientes;
 using HORUSPDV_API.Services.Email;
 using HORUSPDV_API.Services.Fornecedores;
+using HORUSPDV_API.Services.Licensing;
 using HORUSPDV_API.Services.Produtos;
 using HORUSPDV_API.Services.Security;
 
@@ -48,6 +49,10 @@ builder.Services.AddScoped<HomeAB>();
 builder.Services.AddScoped<RelatorioAB>();
 builder.Services.AddScoped<HorusCaixaService>();
 builder.Services.AddScoped<HorusSecurityStore>();
+builder.Services.AddScoped<FourBytsLicenseStore>();
+builder.Services.AddSingleton<FourBytsLicenseOptions>();
+builder.Services.AddHttpClient<FourBytsLicenseService>();
+builder.Services.AddScoped<FourBytsLicenseGuard>();
 builder.Services.AddSingleton<HorusSecurityOptions>();
 builder.Services.AddSingleton<HorusSecretProtector>();
 builder.Services.AddSingleton<HorusJwtService>();
@@ -60,6 +65,7 @@ builder.Services.AddScoped<IFornecedorService, FornecedorService>();
 var app = builder.Build();
 
 app.Services.GetRequiredService<HorusSecurityOptions>().Validate();
+app.Services.GetRequiredService<FourBytsLicenseOptions>().Validate();
 await HorusDatabaseInitializer.InitializeAsync(app.Services);
 
 if (app.Environment.IsDevelopment())
@@ -95,6 +101,7 @@ app.UseMiddleware<HorusRequestTelemetryMiddleware>();
 app.UseMiddleware<HorusRequestBodyLimitMiddleware>();
 app.UseMiddleware<HorusRateLimitMiddleware>();
 app.UseMiddleware<HorusAuthMiddleware>();
+app.UseMiddleware<FourBytsLicenseMiddleware>();
 app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())

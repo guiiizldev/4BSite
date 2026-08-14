@@ -8,6 +8,7 @@
     "dev:api": "node --watch server/index.js",
     "start:api": "node server/index.js",
     "create:admin": "node server/create-admin.js",
+    "test:licenses": "node scripts/test-license-api.js",
     "build": "vite build",
     "preview": "vite preview"
   },

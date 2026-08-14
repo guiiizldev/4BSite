@@ -51,7 +51,7 @@ public class HorusSecurityStore(Connection connection, HorusSecurityOptions secu
         return ToDto(user);
     }
 
-    public SecurityUserDto RegisterPublicUser(AuthRegisterRequest request)
+    public void ValidatePublicRegistration(AuthRegisterRequest request)
     {
         if (!IsValidCnpj(request.Cnpj))
         {
@@ -63,7 +63,27 @@ public class HorusSecurityStore(Connection connection, HorusSecurityOptions secu
             throw new InvalidOperationException("A confirmação de senha não confere.");
         }
 
-        var companyId = $"emp-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+        if (string.IsNullOrWhiteSpace(request.Name)) throw new InvalidOperationException("Nome da empresa é obrigatório.");
+        if (string.IsNullOrWhiteSpace(request.Email) || !request.Email.Contains('@')) throw new InvalidOperationException("E-mail inválido.");
+        if (request.Password.Length < 8) throw new InvalidOperationException("A senha deve ter pelo menos 8 caracteres.");
+        using var db = connection.OpenConnection();
+        using var command = new SqlCommand(
+            """
+            SELECT COUNT(1) FROM Usuarios
+            WHERE Email = @Email
+               OR REPLACE(REPLACE(REPLACE(REPLACE(Cpf, '.', ''), '/', ''), '-', ''), ' ', '') = @Cnpj;
+            """,
+            db);
+        command.Parameters.AddWithValue("@Email", request.Email.Trim().ToLowerInvariant());
+        command.Parameters.AddWithValue("@Cnpj", OnlyDigits(request.Cnpj));
+        if (Convert.ToInt32(command.ExecuteScalar()) > 0)
+            throw new InvalidOperationException("Já existe uma empresa cadastrada com este CNPJ ou e-mail.");
+    }
+
+    public SecurityUserDto RegisterPublicUser(AuthRegisterRequest request, string companyId)
+    {
+        ValidatePublicRegistration(request);
+
         var user = MapRequest($"usr-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}", new UsuarioRequest
         {
             Cpf = request.Cnpj,

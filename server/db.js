@@ -61,6 +61,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_devices_license ON devices(license_id);
 `);
 
+const deviceColumns = new Set(db.prepare('PRAGMA table_info(devices)').all().map(column => column.name));
+if (!deviceColumns.has('activation_token_hash')) db.exec('ALTER TABLE devices ADD COLUMN activation_token_hash TEXT');
+if (!deviceColumns.has('company_document')) db.exec('ALTER TABLE devices ADD COLUMN company_document TEXT');
+if (!deviceColumns.has('last_ip')) db.exec('ALTER TABLE devices ADD COLUMN last_ip TEXT');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_activation_token ON devices(activation_token_hash) WHERE activation_token_hash IS NOT NULL');
+
 export function cleanupExpiredSessions() {
   db.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
 }

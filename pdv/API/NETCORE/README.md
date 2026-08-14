@@ -40,6 +40,21 @@ Script principal:
 <pre><code class="language-text">DataBase/Resumo.sql
 </code></pre>
 
+## Central de licenças 4Byts
+
+O cadastro comercial ativa uma chave na API central e salva o token de ativação criptografado na tabela `Licencas4Byts`. A API revalida o status periodicamente e permite uma tolerância offline configurável apenas para licenças que estavam ativas na última validação.
+
+Configuração por ambiente:
+
+<pre><code class="language-bash">Licensing__Enabled=true
+Licensing__BaseUrl=http://127.0.0.1:4310
+Licensing__ServiceKey="SEGREDO_COMPARTILHADO_COM_A_API_CENTRAL"
+Licensing__ValidationMinutes=15
+Licensing__GraceHours=72
+</code></pre>
+
+O mesmo segredo deve estar em `LICENSE_SERVICE_API_KEY` no processo Node do site. Use um valor aleatório com no mínimo 32 caracteres e nunca o envie ao frontend ou ao repositório.
+
 ## E-mail
 
 Nenhum remetente real é versionado. Configure uma conta da 4Byts ou da empresa por ambiente/User Secrets.

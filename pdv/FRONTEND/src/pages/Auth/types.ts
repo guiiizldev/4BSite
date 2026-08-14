@@ -22,4 +22,5 @@ export type RegisterFormPayload = {
   phone: string;
   password: string;
   confirmPassword: string;
+  licenseKey: string;
 };

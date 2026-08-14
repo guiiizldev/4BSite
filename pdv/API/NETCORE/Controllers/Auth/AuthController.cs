@@ -7,6 +7,7 @@ using HORUSPDV_API.Models.Requests;
 using HORUSPDV_API.Models.Response;
 using HORUSPDV_API.Repositories.DatabaseAccess;
 using HORUSPDV_API.Services.Email;
+using HORUSPDV_API.Services.Licensing;
 using HORUSPDV_API.Services.Security;
 using Microsoft.AspNetCore.Mvc;
 
@@ -19,6 +20,9 @@ public class AuthController(
     HorusJwtService jwtService,
     HorusRecaptchaService recaptchaService,
     HorusEmailService emailService,
+    FourBytsLicenseService licenseService,
+    FourBytsLicenseStore licenseStore,
+    FourBytsLicenseGuard licenseGuard,
     HorusSecurityOptions securityOptions,
     IWebHostEnvironment environment,
     ILogger<AuthController> logger) : ControllerBase
@@ -60,6 +64,18 @@ public class AuthController(
                 Success = false,
                 Message = result.Message,
                 Data = result.LockedUntil is null ? null : new { lockedUntil = result.LockedUntil.Value.ToString("o") }
+            });
+        }
+
+        var licenseAccess = await licenseGuard.CheckAsync(result.User.CompanyId, HttpContext.RequestAborted);
+        if (!licenseAccess.IsAllowed)
+        {
+            securityStore.TerminateCurrentSession(result.Session.Id);
+            return StatusCode(StatusCodes.Status402PaymentRequired, new ApiResponse<object>
+            {
+                Success = false,
+                Message = licenseAccess.Message,
+                Data = new { licenseRequired = true }
             });
         }
 
@@ -135,7 +151,7 @@ public class AuthController(
             {
                 await emailService.SendPasswordResetEmailAsync(
                     request.Email,
-                    "Hórus PDV",
+                    "4Byts PDV",
                     resetUrl,
                     resetRequest.ExpiresAt.Value,
                     HttpContext.RequestAborted);
@@ -227,7 +243,26 @@ public class AuthController(
 
         try
         {
-            var user = securityStore.RegisterPublicUser(request);
+            securityStore.ValidatePublicRegistration(request);
+            var companyId = $"emp-{Guid.NewGuid():N}";
+            var cnpj = new string(request.Cnpj.Where(char.IsDigit).ToArray());
+            var activation = await licenseService.ActivateAsync(
+                request.LicenseKey,
+                $"pdv:{cnpj}",
+                request.Name,
+                cnpj,
+                HttpContext.RequestAborted);
+            if (!activation.Success)
+            {
+                return StatusCode(StatusCodes.Status402PaymentRequired, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = activation.Error,
+                    Data = new { licenseRequired = true }
+                });
+            }
+            var user = securityStore.RegisterPublicUser(request, companyId);
+            licenseStore.SaveActivation(companyId, activation);
             try
             {
                 await emailService.SendSignupWelcomeEmailAsync(
@@ -250,6 +285,15 @@ public class AuthController(
         catch (InvalidOperationException ex)
         {
             return BadRequest(new ApiResponse<object> { Success = false, Message = ex.Message });
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            logger.LogWarning(ex, "Central de licenças indisponível durante o cadastro de {Email}.", request.Email);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new ApiResponse<object>
+            {
+                Success = false,
+                Message = "A central de licenças está temporariamente indisponível. Tente novamente em instantes."
+            });
         }
     }
 

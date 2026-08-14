@@ -29,6 +29,7 @@ export type RegisterPayload = {
   phone: string;
   password: string;
   confirmPassword: string;
+  licenseKey: string;
   recaptchaToken?: string;
 };
 
