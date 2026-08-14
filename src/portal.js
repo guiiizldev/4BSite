@@ -2,7 +2,8 @@ import './styles.css';
 import './portal.css';
 
 const root = document.querySelector('#portal');
-const logo = '<span class="official-logo official-logo--portal"><img src="/assets/logo.png" alt="4Byts" /></span>';
+const lightLogo = '<span class="official-logo official-logo--portal"><img src="/assets/logo.png" alt="4Byts" /></span>';
+const darkLogo = '<span class="official-logo official-logo--portal"><img src="/assets/logo-footer.png" alt="4Byts" /></span>';
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
@@ -31,7 +32,7 @@ function authScreen(mode = 'login') {
   root.innerHTML = `
     <main class="auth-layout">
       <section class="auth-brand-panel">
-        <a href="/" class="portal-brand">${logo}</a>
+        <a href="/" class="portal-brand">${darkLogo}</a>
         <div class="auth-brand-copy">
           <span class="portal-kicker">PORTAL 4BYTS</span>
           <h1>Controle suas licenças.<br><em>Simples assim.</em></h1>
@@ -42,7 +43,7 @@ function authScreen(mode = 'login') {
       <section class="auth-form-panel">
         <a href="/" class="back-link">← Voltar ao site</a>
         <div class="auth-box">
-          <span class="mobile-auth-logo">${logo}</span>
+          <span class="mobile-auth-logo">${lightLogo}</span>
           <div class="auth-tabs" role="tablist">
             <button class="${mode === 'login' ? 'active' : ''}" data-auth-tab="login">Entrar</button>
             <button class="${mode === 'register' ? 'active' : ''}" data-auth-tab="register">Criar conta</button>
@@ -125,7 +126,7 @@ async function dashboard() {
     root.innerHTML = `
       <div class="customer-shell">
         <aside class="customer-sidebar">
-          <a href="/" class="portal-brand">${logo}</a>
+          <a href="/" class="portal-brand">${darkLogo}</a>
           <nav><button class="active"><span>⌂</span> Visão geral</button><button><span>◇</span> Minhas licenças</button><a href="mailto:contato@4byts.com"><span>?</span> Suporte</a></nav>
           <div class="sidebar-user"><span>${escapeHtml(user.name.slice(0, 2).toUpperCase())}</span><div><b>${escapeHtml(user.name)}</b><small>${escapeHtml(user.email)}</small></div></div>
         </aside>
