@@ -16,6 +16,10 @@ app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '32kb' }));
 app.use(cookieParser());
+app.use('/api', (_request, response, next) => {
+  response.set('Cache-Control', 'no-store, private');
+  next();
+});
 
 app.use((request, response, next) => {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return next();
