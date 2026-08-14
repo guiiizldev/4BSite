@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net8.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <RootNamespace>HORUSPDV_API</RootNamespace>
+        <UserSecretsId>horus-pdv-api-dev</UserSecretsId>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+        <PackageReference Include="Swashbuckle.AspNetCore" Version="10.1.5" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Content Include="DataBase\Resumo.sql" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+</Project>

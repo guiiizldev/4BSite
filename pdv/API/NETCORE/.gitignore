@@ -1,0 +1,43 @@
+# Build results
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+
+# Visual Studio
+.vs/
+.vscode/
+*.user
+*.suo
+*.sln.docstates
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+
+# Local user-specific files
+appsettings.local.json
+launchSettings.json
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+packages/
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+tmp/
+temp/
