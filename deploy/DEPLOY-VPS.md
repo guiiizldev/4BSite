@@ -1,6 +1,8 @@
 # Publicação na VPS Linux
 
-Configuração recomendada para Ubuntu ou Debian, com Nginx e certificado HTTPS gratuito do Let's Encrypt.
+Configuração recomendada para Ubuntu ou Debian, com Nginx e certificado HTTPS gratuito do Let's Encrypt. Esta implantação usa uma pasta e um virtual host exclusivos para a 4Byts e pode coexistir com a GriffyStore na mesma VPS.
+
+> Não remova nem altere os arquivos Nginx da GriffyStore. O site da 4Byts deve ser adicionado como uma configuração independente.
 
 ## 1. Configure o DNS
 
@@ -24,6 +26,14 @@ sudo mkdir -p /var/www/4byts
 sudo chown -R "$USER":"$USER" /var/www/4byts
 ```
 
+Antes de alterar o Nginx, registre as configurações existentes:
+
+```bash
+sudo nginx -T > "$HOME/nginx-antes-4byts.txt"
+sudo ls -la /etc/nginx/sites-enabled
+sudo nginx -t
+```
+
 ## 3. Baixe e compile o site
 
 ```bash
@@ -42,13 +52,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-Se o arquivo `/etc/nginx/sites-enabled/default` estiver exibindo a página padrão do Nginx, desative-o:
-
-```bash
-sudo unlink /etc/nginx/sites-enabled/default
-sudo nginx -t
-sudo systemctl reload nginx
-```
+Não desative o site `default` nem qualquer configuração da GriffyStore sem antes confirmar a qual domínio ela atende. Configurações Nginx com `server_name` diferentes funcionam simultaneamente nas mesmas portas 80 e 443.
 
 ## 5. Ative HTTPS
 
@@ -57,6 +61,13 @@ Execute somente depois de `4byts.com` e `www.4byts.com` apontarem para a VPS:
 ```bash
 sudo certbot --nginx -d 4byts.com -d www.4byts.com
 sudo certbot renew --dry-run
+```
+
+O Certbot deve modificar somente o bloco de servidor de `4byts.com`. Depois da emissão, valide todos os sites antes de recarregar:
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
 ```
 
 ## Atualizações futuras
