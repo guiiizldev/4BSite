@@ -206,7 +206,7 @@ document.querySelector('#app').innerHTML = `
 
   <footer>
     <div class="container footer-main">
-      <div class="footer-brand"><a class="brand footer-logo-card" href="#inicio" aria-label="4Byts início"><span class="official-logo official-logo--footer"><img src="/assets/logo.png" alt="4Byts" /></span></a><p>Tecnologia simples.<br>Resultados extraordinários.</p></div>
+      <div class="footer-brand"><a class="brand footer-logo-card" href="#inicio" aria-label="4Byts início"><span class="official-logo official-logo--footer"><img src="/assets/logo-footer.png" alt="4Byts" /></span></a><p>Tecnologia simples.<br>Resultados extraordinários.</p></div>
       <div><h4>Soluções</h4><a href="#solucoes">4Byts PDV</a><a href="#solucoes">Sistemas sob medida</a><a href="#licencas">Licenciamento</a></div>
       <div><h4>Empresa</h4><a href="#sobre">Sobre nós</a><a href="#processo">Como trabalhamos</a><a href="#contato">Contato</a></div>
       <div><h4>Atendimento</h4><a href="mailto:contato@4byts.com">contato@4byts.com</a><a href="#contato">Falar no WhatsApp</a><span>Seg–Sex, 9h às 18h</span></div>
