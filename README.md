@@ -36,6 +36,8 @@ npm run build
 
 O diretório `pdv/` contém a evolução comercial do sistema de frente de caixa, com frontend React/TypeScript, API ASP.NET Core e banco SQL Server. O produto está em desenvolvimento e ainda não deve ser publicado em produção.
 
+A homologação isolada em `pdv.4byts.com` está documentada em [`deploy/pdv/DEPLOY-HOMOLOG.md`](./deploy/pdv/DEPLOY-HOMOLOG.md). Execute primeiro o verificador de recursos para não afetar os outros sistemas da VPS.
+
 ## Próximas fases
 
 Os preços e pagamentos ainda são demonstrativos. A autenticação e a base de licenças já possuem backend próprio. As próximas fases devem conectar:

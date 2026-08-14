@@ -13,6 +13,8 @@ using HORUSPDV_API.Services.Fornecedores;
 using HORUSPDV_API.Services.Licensing;
 using HORUSPDV_API.Services.Produtos;
 using HORUSPDV_API.Services.Security;
+using Microsoft.AspNetCore.HttpOverrides;
+using System.Net;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -64,9 +66,21 @@ builder.Services.AddScoped<IFornecedorService, FornecedorService>();
 
 var app = builder.Build();
 
-app.Services.GetRequiredService<HorusSecurityOptions>().Validate();
+var securityOptions = app.Services.GetRequiredService<HorusSecurityOptions>();
+securityOptions.Validate();
 app.Services.GetRequiredService<FourBytsLicenseOptions>().Validate();
 await HorusDatabaseInitializer.InitializeAsync(app.Services);
+
+if (securityOptions.TrustForwardedHeaders)
+{
+    var forwardedHeaders = new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+    };
+    forwardedHeaders.KnownProxies.Add(IPAddress.Loopback);
+    forwardedHeaders.KnownProxies.Add(IPAddress.IPv6Loopback);
+    app.UseForwardedHeaders(forwardedHeaders);
+}
 
 if (app.Environment.IsDevelopment())
 {

@@ -1,0 +1,31 @@
+[Unit]
+Description=4Byts PDV Homologation API
+Wants=network-online.target docker.service
+After=network-online.target docker.service 4byts-api.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/4byts-pdv/api
+EnvironmentFile=/etc/4byts-pdv/pdv-api.env
+ExecStart=/usr/bin/dotnet /var/www/4byts-pdv/api/HORUSPDV-API.dll
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=180
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

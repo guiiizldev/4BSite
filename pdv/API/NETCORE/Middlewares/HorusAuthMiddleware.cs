@@ -56,7 +56,8 @@ public class HorusAuthMiddleware(RequestDelegate next)
         if (HttpMethods.IsOptions(context.Request.Method)) return true;
 
         var path = context.Request.Path.Value ?? "";
-        return path.StartsWith("/api/Auth/login", StringComparison.OrdinalIgnoreCase) ||
+        return path.Equals("/api/Health", StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWith("/api/Auth/login", StringComparison.OrdinalIgnoreCase) ||
                path.StartsWith("/api/Auth/forgot-password", StringComparison.OrdinalIgnoreCase) ||
                path.StartsWith("/api/Auth/reset-password", StringComparison.OrdinalIgnoreCase) ||
                path.StartsWith("/api/Auth/register", StringComparison.OrdinalIgnoreCase) ||
