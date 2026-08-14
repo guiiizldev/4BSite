@@ -21,17 +21,17 @@ npm run build
 - Apresentação do 4Byts PDV e soluções sob medida
 - Simulação de planos mensal e anual
 - Formulário comercial com máscara de WhatsApp
-- Tela demonstrativa da área do cliente
+- Portal funcional com cadastro, login e sessões seguras
+- Banco próprio da 4Byts para clientes, licenças e dispositivos
+- Consulta e vínculo de licenças por chave
 - Apresentação do fluxo de licenciamento
 - Menu mobile, modais, feedbacks e animações
 
 ## Próxima fase: backend
 
-Os formulários, preços, autenticação e licenças são demonstrativos. Para operação comercial, a próxima fase deve conectar:
+Os preços e pagamentos ainda são demonstrativos. A autenticação e a base de licenças já possuem backend próprio. As próximas fases devem conectar:
 
-- banco de dados de clientes, produtos, pedidos e licenças;
-- autenticação segura da área do cliente;
 - gateway de pagamento e assinaturas;
-- emissão, ativação e revogação de chaves de licença;
+- painel administrativo para emissão, suspensão e revogação de licenças;
 - envio de leads por WhatsApp, e-mail ou CRM;
-- painel administrativo da equipe 4Byts.
+- recuperação de senha por e-mail e verificação de conta.

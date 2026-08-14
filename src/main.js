@@ -214,17 +214,6 @@ document.querySelector('#app').innerHTML = `
     <div class="container footer-bottom"><span>© 2026 4Byts Tecnologia. Todos os direitos reservados.</span><div><a href="#">Privacidade</a><a href="#">Termos de uso</a></div></div>
   </footer>
 
-  <div class="modal" id="clientModal" aria-hidden="true">
-    <div class="modal-backdrop"></div>
-    <div class="modal-panel">
-      <button class="modal-close" aria-label="Fechar">${Icon('close')}</button>
-      <div class="modal-logo"><span class="official-logo official-logo--modal"><img src="/assets/logo.png" alt="4Byts" /></span></div>
-      <span class="kicker">PORTAL 4BYTS</span><h2>Área do cliente</h2><p>Gerencie suas licenças, dispositivos e renovações.</p>
-      <form id="loginForm"><label><span>E-mail</span><input type="email" required placeholder="voce@empresa.com" /></label><label><span>Senha</span><input type="password" required placeholder="Sua senha" /></label><div class="form-help"><label><input type="checkbox" /> Lembrar de mim</label><a href="#">Esqueci minha senha</a></div><button class="btn btn-primary" type="submit">Entrar na plataforma ${Icon('arrow')}</button></form>
-      <small class="demo-note">Demonstração visual — o acesso real será conectado ao backend de licenças.</small>
-    </div>
-  </div>
-
   <div class="modal" id="productModal" aria-hidden="true">
     <div class="modal-backdrop"></div>
     <div class="modal-panel product-modal-panel">
@@ -258,9 +247,8 @@ const toggleModal = (modal, open) => {
   document.body.classList.toggle('modal-open', open);
 };
 
-const clientModal = document.querySelector('#clientModal');
 const productModal = document.querySelector('#productModal');
-document.querySelectorAll('.open-client').forEach(btn => btn.addEventListener('click', () => toggleModal(clientModal, true)));
+document.querySelectorAll('.open-client').forEach(btn => btn.addEventListener('click', () => { window.location.href = '/portal.html'; }));
 document.querySelectorAll('.product-detail').forEach(btn => btn.addEventListener('click', () => toggleModal(productModal, true)));
 document.querySelectorAll('.modal').forEach(modal => {
   modal.querySelector('.modal-close').addEventListener('click', () => toggleModal(modal, false));
@@ -287,11 +275,6 @@ document.querySelector('#leadForm').addEventListener('submit', e => {
   e.preventDefault();
   showToast('Recebemos sua mensagem! Entraremos em contato.');
   e.target.reset();
-});
-document.querySelector('#loginForm').addEventListener('submit', e => {
-  e.preventDefault();
-  toggleModal(clientModal, false);
-  showToast('Portal demonstrativo. A autenticação será conectada ao backend.');
 });
 
 const phone = document.querySelector('input[name="phone"]');

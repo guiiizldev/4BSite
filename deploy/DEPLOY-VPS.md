@@ -92,6 +92,36 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
+## 6. Portal do cliente e banco próprio
+
+O portal usa uma API exclusiva em `127.0.0.1:4310` e um banco próprio em `/var/lib/4byts/4byts.db`. Nada é compartilhado com a GriffyStore.
+
+```bash
+sudo mkdir -p /var/lib/4byts
+sudo chown -R www-data:www-data /var/lib/4byts
+sudo chmod 750 /var/lib/4byts
+
+sudo cp /var/www/4byts/deploy/4byts-api.service /etc/systemd/system/4byts-api.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now 4byts-api
+sudo systemctl status 4byts-api --no-pager
+curl http://127.0.0.1:4310/api/health
+```
+
+Como o Certbot já adicionou HTTPS, não substitua agora o arquivo Nginx inteiro. Adicione manualmente o bloco `location /api/` de `deploy/nginx-4byts.conf` dentro do bloco HTTPS existente em `/etc/nginx/sites-available/4byts`.
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+curl https://4byts.com/api/health
+```
+
+Crie a primeira conta administrativa:
+
+```bash
+cd /var/www/4byts
+sudo -u www-data env DATABASE_PATH=/var/lib/4byts/4byts.db node server/create-admin.js
+```
+
 ## Atualizações futuras
 
 ```bash
@@ -99,8 +129,9 @@ cd /var/www/4byts
 git pull --ff-only
 npm ci
 npm run build
+sudo systemctl restart 4byts-api
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-O site é estático depois do build; não é necessário deixar um processo Node.js em execução.
+O site público continua estático. Apenas a API do portal permanece ativa, isolada na porta local `4310`.
