@@ -62,6 +62,27 @@ const adminLicenseSchema = z.object({
   expiresAt: z.string().datetime().nullable().optional()
 });
 
+const adminUserSchema = registerSchema.extend({
+  role: z.enum(['customer', 'admin']).optional().default('customer')
+});
+
+const adminUserUpdateSchema = z.object({
+  name: z.string().trim().min(2).max(100),
+  email: z.string().trim().email().max(180).transform(value => value.toLowerCase()),
+  company: z.string().trim().max(120).optional().default(''),
+  role: z.enum(['customer', 'admin']),
+  password: z.union([z.string().min(8).max(72), z.literal('')]).optional()
+});
+
+const adminLicenseUpdateSchema = z.object({
+  email: z.union([z.string().trim().email(), z.literal('')]).optional(),
+  product: z.string().trim().min(2).max(80),
+  plan: z.string().trim().min(2).max(50),
+  status: z.enum(['active', 'suspended', 'expired', 'revoked']),
+  maxDevices: z.number().int().min(1).max(100),
+  expiresAt: z.union([z.string().datetime(), z.null()]).optional()
+});
+
 app.get('/api/health', (_request, response) => {
   response.json({ status: 'ok', service: '4byts-api', time: new Date().toISOString() });
 });
@@ -143,6 +164,38 @@ app.get('/api/admin/users', requireAuth, requireAdmin, (_request, response) => {
   response.json({ users });
 });
 
+app.post('/api/admin/users', requireAuth, requireAdmin, async (request, response) => {
+  const parsed = adminUserSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ error: 'Revise os dados do cliente.' });
+  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(parsed.data.email);
+  if (existing) return response.status(409).json({ error: 'Este e-mail já possui uma conta.' });
+  const passwordHash = await bcrypt.hash(parsed.data.password, 12);
+  const result = db.prepare(`
+    INSERT INTO users (name, email, company, password_hash, role) VALUES (?, ?, ?, ?, ?)
+  `).run(parsed.data.name, parsed.data.email, parsed.data.company || null, passwordHash, parsed.data.role);
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
+  response.status(201).json({ user: publicUser(user) });
+});
+
+app.patch('/api/admin/users/:id', requireAuth, requireAdmin, async (request, response) => {
+  const id = Number(request.params.id);
+  const parsed = adminUserUpdateSchema.safeParse(request.body);
+  if (!Number.isSafeInteger(id) || !parsed.success) return response.status(400).json({ error: 'Revise os dados da conta.' });
+  const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  if (!existing) return response.status(404).json({ error: 'Conta não encontrada.' });
+  if (id === request.user.id && parsed.data.role !== 'admin') return response.status(409).json({ error: 'Você não pode remover sua própria permissão de administrador.' });
+  const emailOwner = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(parsed.data.email, id);
+  if (emailOwner) return response.status(409).json({ error: 'Este e-mail já pertence a outra conta.' });
+  const passwordHash = parsed.data.password ? await bcrypt.hash(parsed.data.password, 12) : existing.password_hash;
+  db.prepare(`
+    UPDATE users SET name = ?, email = ?, company = ?, role = ?, password_hash = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(parsed.data.name, parsed.data.email, parsed.data.company || null, parsed.data.role, passwordHash, id);
+  if (parsed.data.password) db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(id, request.user.session_id);
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  response.json({ user: publicUser(user), message: 'Conta atualizada com sucesso.' });
+});
+
 app.get('/api/admin/licenses', requireAuth, requireAdmin, (_request, response) => {
   const licenses = db.prepare(`
     SELECT licenses.*, users.name AS customer_name, users.email AS customer_email
@@ -163,6 +216,23 @@ app.post('/api/admin/licenses', requireAuth, requireAdmin, (request, response) =
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(key, user?.id || null, parsed.data.product, parsed.data.plan, parsed.data.maxDevices, parsed.data.expiresAt || null, user ? new Date().toISOString() : null);
   response.status(201).json({ id: Number(result.lastInsertRowid), key });
+});
+
+app.patch('/api/admin/licenses/:id', requireAuth, requireAdmin, (request, response) => {
+  const id = Number(request.params.id);
+  const parsed = adminLicenseUpdateSchema.safeParse(request.body);
+  if (!Number.isSafeInteger(id) || !parsed.success) return response.status(400).json({ error: 'Revise os dados da licença.' });
+  const existing = db.prepare('SELECT id FROM licenses WHERE id = ?').get(id);
+  if (!existing) return response.status(404).json({ error: 'Licença não encontrada.' });
+  const normalizedEmail = parsed.data.email?.toLowerCase() || '';
+  const user = normalizedEmail ? db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail) : null;
+  if (normalizedEmail && !user) return response.status(404).json({ error: 'Cliente não encontrado.' });
+  db.prepare(`
+    UPDATE licenses SET user_id = ?, product = ?, plan = ?, status = ?, max_devices = ?, expires_at = ?,
+      activated_at = CASE WHEN ? IS NOT NULL THEN COALESCE(activated_at, datetime('now')) ELSE activated_at END
+    WHERE id = ?
+  `).run(user?.id || null, parsed.data.product, parsed.data.plan, parsed.data.status, parsed.data.maxDevices, parsed.data.expiresAt || null, user?.id || null, id);
+  response.json({ message: 'Licença atualizada com sucesso.' });
 });
 
 app.use('/api', (_request, response) => response.status(404).json({ error: 'Rota não encontrada.' }));

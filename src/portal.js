@@ -117,10 +117,102 @@ function licenseCard(license) {
     </article>`;
 }
 
+const inputDateTime = value => value ? new Date(value).toISOString().slice(0, 16) : '';
+
+function adminModal(title, content) {
+  document.querySelector('#adminModal')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `
+    <div id="adminModal" class="admin-modal">
+      <button class="admin-modal-backdrop" aria-label="Fechar"></button>
+      <section class="admin-modal-card">
+        <button class="admin-modal-close" type="button" aria-label="Fechar">×</button>
+        <h2>${escapeHtml(title)}</h2>${content}
+      </section>
+    </div>`);
+  const modal = document.querySelector('#adminModal');
+  const close = () => modal.remove();
+  modal.querySelector('.admin-modal-backdrop').addEventListener('click', close);
+  modal.querySelector('.admin-modal-close').addEventListener('click', close);
+  return modal;
+}
+
+function userForm(user = {}) {
+  return `<form id="adminUserForm" class="admin-form">
+    <div class="portal-form-row"><label><span>Nome</span><input name="name" value="${escapeHtml(user.name || '')}" required minlength="2"></label><label><span>Empresa</span><input name="company" value="${escapeHtml(user.company || '')}"></label></div>
+    <label><span>E-mail</span><input type="email" name="email" value="${escapeHtml(user.email || '')}" required></label>
+    <div class="portal-form-row"><label><span>${user.id ? 'Nova senha (opcional)' : 'Senha inicial'}</span><input type="password" name="password" minlength="8" ${user.id ? '' : 'required'}></label><label><span>Permissão</span><select name="role"><option value="customer" ${user.role !== 'admin' ? 'selected' : ''}>Cliente</option><option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Administrador</option></select></label></div>
+    <div id="adminFormMessage" class="portal-message" hidden></div><button class="portal-primary" type="submit">${user.id ? 'Salvar alterações' : 'Criar conta'} <span>→</span></button>
+  </form>`;
+}
+
+function licenseForm(license = {}, users = []) {
+  const customerEmail = license.customer_email || '';
+  return `<form id="adminLicenseForm" class="admin-form">
+    <label><span>Cliente (deixe vazio para gerar sem vínculo)</span><input type="email" name="email" list="customerEmails" value="${escapeHtml(customerEmail)}" placeholder="cliente@empresa.com"><datalist id="customerEmails">${users.filter(user => user.role === 'customer').map(user => `<option value="${escapeHtml(user.email)}">${escapeHtml(user.name)}</option>`).join('')}</datalist></label>
+    <div class="portal-form-row"><label><span>Produto</span><input name="product" value="${escapeHtml(license.product || '4Byts PDV')}" required></label><label><span>Plano</span><input name="plan" value="${escapeHtml(license.plan || 'Profissional')}" required></label></div>
+    <div class="portal-form-row"><label><span>Máximo de dispositivos</span><input type="number" name="maxDevices" min="1" max="100" value="${license.max_devices || 1}" required></label><label><span>Vencimento (opcional)</span><input type="datetime-local" name="expiresAt" value="${inputDateTime(license.expires_at)}"></label></div>
+    ${license.id ? `<label><span>Status</span><select name="status"><option value="active" ${license.status === 'active' ? 'selected' : ''}>Ativa</option><option value="suspended" ${license.status === 'suspended' ? 'selected' : ''}>Suspensa</option><option value="expired" ${license.status === 'expired' ? 'selected' : ''}>Expirada</option><option value="revoked" ${license.status === 'revoked' ? 'selected' : ''}>Revogada</option></select></label>` : ''}
+    <div id="adminFormMessage" class="portal-message" hidden></div><button class="portal-primary" type="submit">${license.id ? 'Salvar licença' : 'Gerar licença'} <span>→</span></button>
+  </form>`;
+}
+
+async function adminDashboard(admin) {
+  root.innerHTML = spinner();
+  try {
+    const [{ users }, { licenses }] = await Promise.all([api('/api/admin/users'), api('/api/admin/licenses')]);
+    const activeLicenses = licenses.filter(license => license.status === 'active').length;
+    const customerCount = users.filter(user => user.role === 'customer').length;
+    root.innerHTML = `
+      <div class="customer-shell admin-shell">
+        <aside class="customer-sidebar">
+          <a href="/" class="portal-brand">${darkLogo}</a>
+          <nav><button class="active"><span>⌂</span> Administração</button><a href="/"><span>↗</span> Ver site</a></nav>
+          <div class="sidebar-user"><span>${escapeHtml(admin.name.slice(0, 2).toUpperCase())}</span><div><b>${escapeHtml(admin.name)}</b><small>Administrador geral</small></div></div>
+        </aside>
+        <main class="customer-main">
+          <header class="customer-header"><button class="customer-menu" aria-label="Abrir menu">☰</button><span class="admin-header-label">PAINEL 4BYTS</span><button id="logoutButton" class="logout-button">Sair</button></header>
+          <div class="customer-content admin-content">
+            <div class="customer-welcome"><div><span class="portal-kicker">ADMINISTRAÇÃO</span><h1>Visão geral</h1><p>Gerencie clientes e licenças em um só lugar.</p></div><div class="admin-actions"><button id="newUser" class="portal-secondary">+ Criar cliente</button><button id="newLicense" class="portal-primary compact">+ Gerar licença</button></div></div>
+            <div class="customer-metrics"><article><span>Clientes</span><strong>${customerCount}</strong><small>contas cadastradas</small></article><article><span>Licenças ativas</span><strong>${activeLicenses}</strong><small>de ${licenses.length} licenças</small></article><article><span>Administradores</span><strong>${users.length - customerCount}</strong><small>acesso geral</small></article></div>
+            <section class="admin-section"><div class="licenses-heading"><div><h2>Clientes e contas</h2><p>Crie contas, altere dados, permissões e senhas.</p></div></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Cliente</th><th>Empresa</th><th>Permissão</th><th>Licenças</th><th></th></tr></thead><tbody>${users.map(user => `<tr><td><b>${escapeHtml(user.name)}</b><small>${escapeHtml(user.email)}</small></td><td>${escapeHtml(user.company || '—')}</td><td><span class="admin-role ${user.role}">${user.role === 'admin' ? 'Administrador' : 'Cliente'}</span></td><td>${user.license_count}</td><td><button class="admin-edit" data-edit-user="${user.id}">Editar</button></td></tr>`).join('')}</tbody></table></div></section>
+            <section class="admin-section"><div class="licenses-heading"><div><h2>Licenças</h2><p>Emita, atribua, suspenda ou atualize licenças.</p></div></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Chave</th><th>Cliente</th><th>Produto / plano</th><th>Status</th><th></th></tr></thead><tbody>${licenses.length ? licenses.map(license => `<tr><td><b class="license-key-cell">${escapeHtml(license.license_key)}</b></td><td>${license.customer_name ? `<b>${escapeHtml(license.customer_name)}</b><small>${escapeHtml(license.customer_email)}</small>` : '<span class="unassigned">Sem vínculo</span>'}</td><td><b>${escapeHtml(license.product)}</b><small>${escapeHtml(license.plan)} · ${license.max_devices} dispositivo(s)</small></td><td><span class="license-status ${escapeHtml(license.status)}">● ${escapeHtml(statusLabel(license.status))}</span></td><td><button class="admin-edit" data-edit-license="${license.id}">Editar</button></td></tr>`).join('') : '<tr><td colspan="5" class="admin-empty">Nenhuma licença emitida.</td></tr>'}</tbody></table></div></section>
+          </div>
+        </main>
+      </div>`;
+
+    const sidebar = document.querySelector('.customer-sidebar');
+    document.querySelector('.customer-menu').addEventListener('click', () => sidebar.classList.toggle('open'));
+    document.querySelector('#logoutButton').addEventListener('click', async () => { await api('/api/auth/logout', { method: 'POST' }); authScreen(); });
+    const openUser = user => {
+      const modal = adminModal(user?.id ? 'Editar conta' : 'Criar conta', userForm(user));
+      modal.querySelector('#adminUserForm').addEventListener('submit', async event => {
+        event.preventDefault(); const form = event.currentTarget; const values = Object.fromEntries(new FormData(form)); const message = form.querySelector('#adminFormMessage');
+        try { await api(user?.id ? `/api/admin/users/${user.id}` : '/api/admin/users', { method: user?.id ? 'PATCH' : 'POST', body: JSON.stringify(values) }); modal.remove(); await adminDashboard(admin); } catch (error) { showMessage(message, error.message); }
+      });
+    };
+    const openLicense = license => {
+      const modal = adminModal(license?.id ? 'Editar licença' : 'Gerar licença', licenseForm(license, users));
+      modal.querySelector('#adminLicenseForm').addEventListener('submit', async event => {
+        event.preventDefault(); const form = event.currentTarget; const values = Object.fromEntries(new FormData(form)); const message = form.querySelector('#adminFormMessage');
+        values.maxDevices = Number(values.maxDevices); values.expiresAt = values.expiresAt ? new Date(values.expiresAt).toISOString() : null;
+        try { const result = await api(license?.id ? `/api/admin/licenses/${license.id}` : '/api/admin/licenses', { method: license?.id ? 'PATCH' : 'POST', body: JSON.stringify(values) }); if (result.key) alert(`Licença criada: ${result.key}`); modal.remove(); await adminDashboard(admin); } catch (error) { showMessage(message, error.message); }
+      });
+    };
+    document.querySelector('#newUser').addEventListener('click', () => openUser());
+    document.querySelector('#newLicense').addEventListener('click', () => openLicense());
+    document.querySelectorAll('[data-edit-user]').forEach(button => button.addEventListener('click', () => openUser(users.find(user => user.id === Number(button.dataset.editUser)))));
+    document.querySelectorAll('[data-edit-license]').forEach(button => button.addEventListener('click', () => openLicense(licenses.find(license => license.id === Number(button.dataset.editLicense)))));
+  } catch (error) {
+    root.innerHTML = `<div class="portal-fatal"><h1>Não foi possível abrir a administração</h1><p>${escapeHtml(error.message)}</p><button onclick="location.reload()">Tentar novamente</button></div>`;
+  }
+}
+
 async function dashboard() {
   root.innerHTML = spinner();
   try {
-    const [{ user }, { licenses }] = await Promise.all([api('/api/auth/me'), api('/api/licenses')]);
+    const { user } = await api('/api/auth/me');
+    if (user.role === 'admin') return adminDashboard(user);
+    const { licenses } = await api('/api/licenses');
     const activeLicenses = licenses.filter(license => license.status === 'active').length;
     const deviceCount = licenses.reduce((total, license) => total + license.deviceCount, 0);
     root.innerHTML = `
