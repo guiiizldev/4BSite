@@ -170,11 +170,20 @@ function userForm(user = {}) {
   </form>`;
 }
 
-function licenseForm(license = {}, users = []) {
+function licenseForm(license = {}, users = [], billingPlans = []) {
   const customerEmail = license.customer_email || '';
+  const activePlans = billingPlans.filter(plan => plan.active !== 0);
+  const currentProduct = license.product || activePlans[0]?.product || '4Byts PDV';
+  const currentPlan = license.plan || activePlans.find(plan => plan.product === currentProduct)?.code || '';
+  const products = [...new Set([currentProduct, ...activePlans.map(plan => plan.product)].filter(Boolean))];
+  const hasCurrentPlan = activePlans.some(plan => plan.product === currentProduct && plan.code === currentPlan);
   return `<form id="adminLicenseForm" class="admin-form">
     <label><span>Cliente (deixe vazio para gerar sem vínculo)</span><input type="email" name="email" list="customerEmails" value="${escapeHtml(customerEmail)}" placeholder="cliente@empresa.com"><datalist id="customerEmails">${users.filter(user => user.role === 'customer').map(user => `<option value="${escapeHtml(user.email)}">${escapeHtml(user.name)}</option>`).join('')}</datalist></label>
-    <div class="portal-form-row"><label><span>Produto</span><input name="product" value="${escapeHtml(license.product || '4Byts PDV')}" required></label><label><span>Plano</span><input name="plan" value="${escapeHtml(license.plan || 'Profissional')}" required></label></div>
+    <div class="portal-form-row">
+      <label><span>Produto</span><select id="licenseProduct" name="product" required>${products.map(product => `<option value="${escapeHtml(product)}" ${product === currentProduct ? 'selected' : ''}>${escapeHtml(product)}</option>`).join('')}</select></label>
+      <label><span>Plano</span><select id="licensePlan" name="plan" required>${!hasCurrentPlan && currentPlan ? `<option value="${escapeHtml(currentPlan)}" data-product="${escapeHtml(currentProduct)}" selected>${escapeHtml(currentPlan)} (plano atual)</option>` : ''}${activePlans.map(plan => `<option value="${escapeHtml(plan.code)}" data-product="${escapeHtml(plan.product)}" ${plan.product === currentProduct && plan.code === currentPlan ? 'selected' : ''}>${escapeHtml(plan.name)} · ${formatMoney(plan.price_cents)}</option>`).join('')}</select></label>
+    </div>
+    ${activePlans.length ? '<p class="form-help">Os planos exibidos são definidos em Administração → Planos.</p>' : '<p class="form-help warning">Crie primeiro um plano comercial para emitir novas licenças.</p>'}
     <div class="portal-form-row"><label><span>Máximo de dispositivos</span><input type="number" name="maxDevices" min="1" max="100" value="${license.max_devices || 1}" required></label><label><span>Vencimento (opcional)</span><input type="datetime-local" name="expiresAt" value="${inputDateTime(license.expires_at)}"></label></div>
     ${license.id ? `<label><span>Status</span><select name="status"><option value="active" ${license.status === 'active' ? 'selected' : ''}>Ativa</option><option value="suspended" ${license.status === 'suspended' ? 'selected' : ''}>Suspensa</option><option value="expired" ${license.status === 'expired' ? 'selected' : ''}>Expirada</option><option value="revoked" ${license.status === 'revoked' ? 'selected' : ''}>Revogada</option></select></label>` : ''}
     <div id="adminFormMessage" class="portal-message" hidden></div><button class="portal-primary" type="submit">${license.id ? 'Salvar licença' : 'Gerar licença'} <span>→</span></button>
@@ -321,7 +330,20 @@ async function adminDashboard(admin, requestedView) {
       });
     };
     const openLicense = license => {
-      const modal = adminModal(license?.id ? 'Editar licença' : 'Gerar licença', licenseForm(license, users));
+      const modal = adminModal(license?.id ? 'Editar licença' : 'Gerar licença', licenseForm(license, users, billing.plans));
+      const productSelect = modal.querySelector('#licenseProduct');
+      const planSelect = modal.querySelector('#licensePlan');
+      const syncLicensePlans = () => {
+        const available = [...planSelect.options].filter(option => option.dataset.product === productSelect.value);
+        [...planSelect.options].forEach(option => {
+          const visible = option.dataset.product === productSelect.value;
+          option.hidden = !visible;
+          option.disabled = !visible;
+        });
+        if (!available.some(option => option.selected)) planSelect.value = available[0]?.value || '';
+      };
+      productSelect.addEventListener('change', syncLicensePlans);
+      syncLicensePlans();
       modal.querySelector('#adminLicenseForm').addEventListener('submit', async event => {
         event.preventDefault(); const form = event.currentTarget; const values = Object.fromEntries(new FormData(form)); const message = form.querySelector('#adminFormMessage');
         values.maxDevices = Number(values.maxDevices); values.expiresAt = values.expiresAt ? new Date(values.expiresAt).toISOString() : null;
