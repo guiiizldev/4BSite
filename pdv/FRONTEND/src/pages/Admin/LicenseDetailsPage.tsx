@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BadgeCheck, BookMarked, Copyright, RefreshCw, Scale, ShieldAlert } from "lucide-react";
+import { BadgeCheck, BookMarked, RefreshCw, Scale, ShieldAlert } from "lucide-react";
 import PageHeader from "@/components/Admin/PageHeader";
 import PageLayout from "@/layout/PageLayout";
 import { licenseService, type LicenseDto } from "@/services/api/licenseService";
@@ -32,7 +32,7 @@ export default function LicenseDetailsPage() {
 
   return (
     <PageLayout className="space-y-4 py-4 md:space-y-6 md:py-6 lg:py-8">
-      <PageHeader title="Licença 4Byts" description="Status do produto, plano contratado e avisos legais." />
+      <PageHeader title="Licença 4Byts" description="Status do produto e informações do plano contratado." />
 
       <section className="card overflow-hidden">
         <div className="border-b border-border-primary bg-gradient-to-r from-secondary/8 via-bg-light to-accent/8 px-4 py-4 md:px-5">
@@ -72,11 +72,6 @@ export default function LicenseDetailsPage() {
           <article className="rounded-xl border border-border-primary bg-bg-primary p-4">
             <p className="inline-flex items-center gap-2 text-sm font-semibold text-text-primary"><Scale size={16} className="text-accent" /> Modelo de licenciamento</p>
             <p className="mt-2 text-sm text-text-secondary">O 4Byts PDV é vinculado à empresa e ao plano contratado. A licença determina vencimento, módulos disponíveis e limite de instalações.</p>
-          </article>
-
-          <article className="rounded-xl border border-border-primary bg-bg-primary p-4">
-            <p className="inline-flex items-center gap-2 text-sm font-semibold text-text-primary"><Copyright size={16} className="text-accent" /> Software de origem</p>
-            <p className="mt-2 text-sm text-text-secondary">O 4Byts PDV contém software derivado do projeto Hórus PDV, de Flávio Oliveira, distribuído sob a licença MIT. O texto integral permanece no arquivo LICENSE da distribuição.</p>
           </article>
 
           <article className="rounded-xl border border-border-primary bg-bg-primary p-4">
