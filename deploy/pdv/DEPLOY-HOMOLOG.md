@@ -110,7 +110,9 @@ dotnet publish pdv/API/NETCORE/HORUSPDV-API.csproj -c Release -o /tmp/4byts-pdv-
 
 sudo install -d -m 755 /var/www/4byts-pdv/frontend /var/www/4byts-pdv/api
 sudo rsync -a --delete pdv/FRONTEND/dist/ /var/www/4byts-pdv/frontend/
-sudo rsync -a --delete /tmp/4byts-pdv-api-publish/ /var/www/4byts-pdv/api/
+sudo rsync -rltD --delete /tmp/4byts-pdv-api-publish/ /var/www/4byts-pdv/api/
+sudo find /var/www/4byts-pdv/api -type d -exec chmod 755 {} +
+sudo find /var/www/4byts-pdv/api -type f -exec chmod 644 {} +
 sudo chown -R root:root /var/www/4byts-pdv
 sudo chmod -R a=rX /var/www/4byts-pdv
 ```
