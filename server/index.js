@@ -8,7 +8,7 @@ import { isIP } from 'node:net';
 import { z } from 'zod';
 import { clearSessionCookie, createSession, destroySession, publicUser, requireAdmin, requireAuth, setSessionCookie } from './auth.js';
 import { billingRouter, financialLicenseStatus } from './billing.js';
-import { cleanupExpiredSessions, db } from './db.js';
+import { auditAction, cleanupExpiredSessions, db } from './db.js';
 
 const app = express();
 const port = Number(process.env.PORT || 4310);
@@ -311,6 +311,16 @@ app.get('/api/admin/users', requireAuth, requireAdmin, (_request, response) => {
   response.json({ users });
 });
 
+app.get('/api/admin/audit', requireAuth, requireAdmin, (_request, response) => {
+  const logs = db.prepare(`
+    SELECT audit_logs.id, audit_logs.action, audit_logs.entity_type, audit_logs.entity_id,
+      audit_logs.summary, audit_logs.created_at, users.name AS actor_name, users.email AS actor_email
+    FROM audit_logs LEFT JOIN users ON users.id = audit_logs.actor_user_id
+    ORDER BY audit_logs.created_at DESC, audit_logs.id DESC LIMIT 250
+  `).all();
+  response.json({ logs });
+});
+
 app.post('/api/admin/users', requireAuth, requireAdmin, async (request, response) => {
   const parsed = adminUserSchema.safeParse(request.body);
   if (!parsed.success) return response.status(400).json({ error: 'Revise os dados do cliente.' });
@@ -321,6 +331,7 @@ app.post('/api/admin/users', requireAuth, requireAdmin, async (request, response
     INSERT INTO users (name, email, company, password_hash, role) VALUES (?, ?, ?, ?, ?)
   `).run(parsed.data.name, parsed.data.email, parsed.data.company || null, passwordHash, parsed.data.role);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
+  auditAction(request.user.id, 'create', 'user', user.id, `${parsed.data.role === 'admin' ? 'Administrador' : 'Cliente'} ${user.email} criado`);
   response.status(201).json({ user: publicUser(user) });
 });
 
@@ -340,6 +351,7 @@ app.patch('/api/admin/users/:id', requireAuth, requireAdmin, async (request, res
   `).run(parsed.data.name, parsed.data.email, parsed.data.company || null, parsed.data.role, passwordHash, id);
   if (parsed.data.password) db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(id, request.user.session_id);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  auditAction(request.user.id, 'update', 'user', id, `Conta ${user.email} atualizada`);
   response.json({ user: publicUser(user), message: 'Conta atualizada com sucesso.' });
 });
 
@@ -388,6 +400,7 @@ app.patch('/api/admin/licenses/:licenseId/devices/:deviceId/approve-ip', require
     `).run(request.user.id, deviceId);
   });
   approve();
+  auditAction(request.user.id, 'approve_ip', 'device', deviceId, `Máquina autorizada no IP ${requestedIp}`);
   response.json({ message: `Máquina e IP ${requestedIp} autorizados.`, ip: requestedIp });
 });
 
@@ -402,6 +415,7 @@ app.patch('/api/admin/licenses/:licenseId/devices/:deviceId/release', requireAut
     WHERE id = ? AND license_id = ? AND released_at IS NULL
   `).run(request.user.id, deviceId, licenseId);
   if (!result.changes) return response.status(404).json({ error: 'Instalação ativa não encontrada.' });
+  auditAction(request.user.id, 'release', 'device', deviceId, `Instalação ${deviceId} liberada da licença ${licenseId}`);
   response.json({ message: 'Instalação liberada. Uma nova ativação já pode ser realizada.' });
 });
 
@@ -416,6 +430,7 @@ app.post('/api/admin/licenses', requireAuth, requireAdmin, (request, response) =
     INSERT INTO licenses (license_key, user_id, product, plan, max_devices, expires_at, activated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(key, user?.id || null, parsed.data.product, parsed.data.plan, parsed.data.maxDevices, parsed.data.expiresAt || null, user ? new Date().toISOString() : null);
+  auditAction(request.user.id, 'create', 'license', result.lastInsertRowid, `Licença ${key} criada para ${parsed.data.product}`);
   response.status(201).json({ id: Number(result.lastInsertRowid), key });
 });
 
@@ -433,6 +448,7 @@ app.patch('/api/admin/licenses/:id', requireAuth, requireAdmin, (request, respon
       activated_at = CASE WHEN ? IS NOT NULL THEN COALESCE(activated_at, datetime('now')) ELSE activated_at END
     WHERE id = ?
   `).run(user?.id || null, parsed.data.product, parsed.data.plan, parsed.data.status, parsed.data.maxDevices, parsed.data.expiresAt || null, user?.id || null, id);
+  auditAction(request.user.id, 'update', 'license', id, `Licença ${id} atualizada para ${parsed.data.status}`);
   response.json({ message: 'Licença atualizada com sucesso.' });
 });
 

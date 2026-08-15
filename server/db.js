@@ -121,6 +121,16 @@ db.exec(`
     UNIQUE (device_id, ip_address)
   );
 
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    action TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT,
+    summary TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash);
   CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
   CREATE INDEX IF NOT EXISTS idx_licenses_user ON licenses(user_id);
@@ -128,6 +138,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_billing_subscriptions_user ON billing_subscriptions(user_id);
   CREATE INDEX IF NOT EXISTS idx_billing_payments_subscription ON billing_payments(subscription_id);
   CREATE INDEX IF NOT EXISTS idx_device_allowed_ips_device ON device_allowed_ips(device_id);
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC);
 `);
 
 const deviceColumns = new Set(db.prepare('PRAGMA table_info(devices)').all().map(column => column.name));
@@ -150,4 +161,11 @@ if (!licenseColumns.has('billing_grace_until')) db.exec('ALTER TABLE licenses AD
 
 export function cleanupExpiredSessions() {
   db.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
+}
+
+export function auditAction(actorUserId, action, entityType, entityId, summary) {
+  db.prepare(`
+    INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, summary)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(actorUserId || null, action, entityType, entityId == null ? null : String(entityId), summary);
 }

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { requireAdmin, requireAuth } from './auth.js';
-import { db } from './db.js';
+import { auditAction, db } from './db.js';
 
 const paidStatuses = new Set(['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH']);
 const ignoredStatuses = new Set(['DELETED', 'CANCELED']);
@@ -239,7 +239,29 @@ billingRouter.post('/billing/sync', requireAuth, async (request, response, next)
 });
 
 billingRouter.get('/admin/billing/plans', requireAuth, requireAdmin, (_request, response) => {
-  response.json({ plans: db.prepare('SELECT * FROM billing_plans ORDER BY created_at DESC').all(), providerConfigured: asaasConfigured() });
+  response.json({
+    plans: db.prepare('SELECT * FROM billing_plans ORDER BY created_at DESC').all(),
+    providerConfigured: asaasConfigured(),
+    environment: process.env.ASAAS_API_URL?.includes('sandbox') || !process.env.ASAAS_API_URL ? 'sandbox' : 'production',
+    ipApprovalRequired: process.env.LICENSE_REQUIRE_IP_APPROVAL !== 'false',
+    billingGraceDays: 5
+  });
+});
+
+billingRouter.get('/admin/billing/subscriptions', requireAuth, requireAdmin, (_request, response) => {
+  const subscriptions = db.prepare(`
+    SELECT subscriptions.id, subscriptions.status, subscriptions.billing_type, subscriptions.next_due_date,
+      subscriptions.created_at, users.name AS customer_name, users.email AS customer_email,
+      licenses.license_key, plans.name AS plan_name, plans.price_cents,
+      (SELECT status FROM billing_payments WHERE subscription_id = subscriptions.id ORDER BY due_date DESC, id DESC LIMIT 1) AS payment_status,
+      (SELECT due_date FROM billing_payments WHERE subscription_id = subscriptions.id ORDER BY due_date DESC, id DESC LIMIT 1) AS payment_due_date
+    FROM billing_subscriptions subscriptions
+    JOIN users ON users.id = subscriptions.user_id
+    JOIN licenses ON licenses.id = subscriptions.license_id
+    JOIN billing_plans plans ON plans.id = subscriptions.plan_id
+    ORDER BY subscriptions.created_at DESC
+  `).all();
+  response.json({ subscriptions });
 });
 
 billingRouter.post('/admin/billing/plans', requireAuth, requireAdmin, (request, response) => {
@@ -249,6 +271,7 @@ billingRouter.post('/admin/billing/plans', requireAuth, requireAdmin, (request, 
     const result = db.prepare(`
       INSERT INTO billing_plans (code, name, product, price_cents, cycle, active) VALUES (?, ?, ?, ?, ?, ?)
     `).run(parsed.data.code, parsed.data.name, parsed.data.product, parsed.data.priceCents, parsed.data.cycle, Number(parsed.data.active));
+    auditAction(request.user.id, 'create', 'billing_plan', result.lastInsertRowid, `Plano ${parsed.data.name} criado`);
     response.status(201).json({ id: Number(result.lastInsertRowid) });
   } catch (error) {
     if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return response.status(409).json({ error: 'Já existe um plano com esse código.' });
