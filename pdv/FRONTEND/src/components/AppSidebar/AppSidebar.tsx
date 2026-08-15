@@ -152,8 +152,8 @@ export default function AppSidebar({
             <div className="flex items-center gap-2">
               <BrandLogo className="h-9 w-[72px]" />
               <div>
-              <h1 className="text-sm font-bold tracking-tight text-accent">4Byts PDV</h1>
-              <p className="text-[11px] text-text-secondary">Painel operacional</p>
+                <h1 className="text-sm font-bold tracking-tight text-accent">PDV</h1>
+                <p className="text-[11px] text-text-secondary">Painel operacional</p>
               </div>
             </div>
           )}
