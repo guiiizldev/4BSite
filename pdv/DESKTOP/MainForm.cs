@@ -7,6 +7,7 @@ public sealed class MainForm : Form
 {
     private static readonly Uri PdvUri = new(Environment.GetEnvironmentVariable("FOURBYTS_PDV_URL") ?? "https://pdv.4byts.com");
     private readonly WebView2 webView = new() { Dock = DockStyle.Fill };
+    private readonly DeviceIdentity deviceIdentity = DeviceIdentity.LoadOrCreate();
 
     public MainForm()
     {
@@ -38,6 +39,8 @@ public sealed class MainForm : Form
 
             webView.CoreWebView2.NavigationStarting += OnNavigationStarting;
             webView.CoreWebView2.NewWindowRequested += OnNewWindowRequested;
+            webView.CoreWebView2.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
+            webView.CoreWebView2.WebResourceRequested += AddDeviceIdentityHeaders;
             webView.CoreWebView2.PermissionRequested += (_, eventArgs) => eventArgs.State = CoreWebView2PermissionState.Deny;
             webView.CoreWebView2.ProcessFailed += (_, _) => BeginInvoke(() => webView.Reload());
             webView.Source = PdvUri;
@@ -50,6 +53,17 @@ public sealed class MainForm : Form
         {
             ShowStartupError($"Não foi possível abrir o 4Byts PDV.\n\n{exception.Message}");
         }
+    }
+
+    private void AddDeviceIdentityHeaders(object? sender, CoreWebView2WebResourceRequestedEventArgs eventArgs)
+    {
+        if (!Uri.TryCreate(eventArgs.Request.Uri, UriKind.Absolute, out var target) ||
+            !IsAllowed(target.AbsoluteUri) ||
+            !target.AbsolutePath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase)) return;
+
+        eventArgs.Request.Headers.SetHeader("X-4Byts-Device-Id", deviceIdentity.Id);
+        eventArgs.Request.Headers.SetHeader("X-4Byts-Device-Name", deviceIdentity.Name);
+        eventArgs.Request.Headers.SetHeader("X-4Byts-Client", "4Byts-PDV-Desktop");
     }
 
     private static bool IsAllowed(string rawUrl)

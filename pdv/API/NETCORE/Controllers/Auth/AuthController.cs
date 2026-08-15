@@ -87,8 +87,8 @@ public class AuthController(
                 {
                     var activation = await licenseService.ActivateAsync(
                         request.LicenseKey,
-                        $"pdv:{company.Cnpj}",
-                        company.Name,
+                        GetInstallationId(company.Cnpj),
+                        GetInstallationName(company.Name),
                         company.Cnpj,
                         ip,
                         HttpContext.RequestAborted);
@@ -296,8 +296,8 @@ public class AuthController(
             var cnpj = new string(request.Cnpj.Where(char.IsDigit).ToArray());
             var activation = await licenseService.ActivateAsync(
                 request.LicenseKey,
-                $"pdv:{cnpj}",
-                request.Name,
+                GetInstallationId(cnpj),
+                GetInstallationName(request.Name),
                 cnpj,
                 GetClientIp(),
                 HttpContext.RequestAborted);
@@ -451,6 +451,22 @@ public class AuthController(
 
     private string GetClientIp()
         => HorusClientIpResolver.Resolve(HttpContext, securityOptions, "0.0.0.0");
+
+    private string GetInstallationId(string cnpj)
+    {
+        var rawDeviceId = Request.Headers["X-4Byts-Device-Id"].ToString().Trim();
+        return Guid.TryParse(rawDeviceId, out var deviceId)
+            ? $"pdv:{cnpj}:{deviceId:N}"
+            : $"pdv:{cnpj}";
+    }
+
+    private string GetInstallationName(string fallback)
+    {
+        var rawDeviceName = Request.Headers["X-4Byts-Device-Name"].ToString().Trim();
+        if (string.IsNullOrWhiteSpace(rawDeviceName)) return fallback;
+        var safeDeviceName = new string(rawDeviceName.Where(character => !char.IsControl(character)).Take(60).ToArray());
+        return string.IsNullOrWhiteSpace(safeDeviceName) ? fallback : $"{fallback} · {safeDeviceName}";
+    }
 
     private void AppendAuthCookie(string token, bool rememberMe)
     {
