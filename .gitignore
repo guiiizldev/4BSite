@@ -6,6 +6,7 @@ dist/
 *.log
 .tools/
 data/
+artifacts/
 pdv/FRONTEND/.env
 pdv/FRONTEND/.env.development
 pdv/FRONTEND/.env.prod
