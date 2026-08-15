@@ -67,7 +67,7 @@ public class AuthController(
             });
         }
 
-        var licenseAccess = await licenseGuard.CheckAsync(result.User.CompanyId, HttpContext.RequestAborted);
+        var licenseAccess = await licenseGuard.CheckAsync(result.User.CompanyId, ip, HttpContext.RequestAborted);
         if (!licenseAccess.IsAllowed)
         {
             securityStore.TerminateCurrentSession(result.Session.Id);
@@ -251,6 +251,7 @@ public class AuthController(
                 $"pdv:{cnpj}",
                 request.Name,
                 cnpj,
+                GetClientIp(),
                 HttpContext.RequestAborted);
             if (!activation.Success)
             {
@@ -262,7 +263,7 @@ public class AuthController(
                 });
             }
             var user = securityStore.RegisterPublicUser(request, companyId);
-            licenseStore.SaveActivation(companyId, activation);
+            licenseStore.SaveActivation(companyId, activation, GetClientIp());
             try
             {
                 await emailService.SendSignupWelcomeEmailAsync(

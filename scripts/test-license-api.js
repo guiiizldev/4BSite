@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const serviceKey = '4byts-license-test-key-with-at-least-32-characters';
+const webhookToken = '4byts-webhook-test-token-with-at-least-32-characters';
 const tempDirectory = mkdtempSync(join(tmpdir(), '4byts-license-test-'));
 const databasePath = join(tempDirectory, 'licenses.db');
 
@@ -56,7 +57,9 @@ const child = spawn(process.execPath, ['server/index.js'], {
     HOST: '127.0.0.1',
     PORT: String(port),
     DATABASE_PATH: databasePath,
-    LICENSE_SERVICE_API_KEY: serviceKey
+    LICENSE_SERVICE_API_KEY: serviceKey,
+    LICENSE_REQUIRE_IP_APPROVAL: 'false',
+    ASAAS_WEBHOOK_TOKEN: webhookToken
   },
   stdio: ['ignore', 'pipe', 'pipe']
 });
@@ -75,6 +78,10 @@ try {
     INSERT INTO licenses (license_key, user_id, product, plan, status, max_devices)
     VALUES (?, ?, '4Byts PDV', 'Profissional', 'active', 1)
   `).run('4BYTS-TESTE-0001', user.lastInsertRowid);
+  const billingLicense = database.prepare(`
+    INSERT INTO licenses (license_key, user_id, product, plan, status, max_devices)
+    VALUES (?, ?, '4Byts PDV', 'Profissional', 'active', 1)
+  `).run('4BYTS-FINANCEIRO-0002', user.lastInsertRowid);
   database.prepare(`
     INSERT INTO users (name, email, company, password_hash, role) VALUES (?, ?, ?, ?, 'admin')
   `).run('Administrador Teste', 'admin@teste.local', '4Byts', bcrypt.hashSync('SenhaTeste123!', 4));
@@ -92,6 +99,48 @@ try {
 
   const validation = await post(baseUrl, '/api/v1/licenses/validate', { activationToken: activation.body.activationToken });
   assert(validation.status === 200 && validation.body.valid === true, 'Licença ativa não foi validada.');
+
+  const billingActivation = await post(baseUrl, '/api/v1/licenses/activate', {
+    licenseKey: '4BYTS-FINANCEIRO-0002', instanceId: 'pdv:55444333000122', companyName: 'Empresa Financeira', companyDocument: '55444333000122'
+  });
+  assert(billingActivation.status === 201, 'A licença financeira não foi ativada para o teste.');
+  const billingPlan = database.prepare(`
+    INSERT INTO billing_plans (code, name, price_cents) VALUES ('pdv-monthly', 'PDV Mensal', 9900)
+  `).run();
+  database.prepare(`
+    INSERT INTO billing_subscriptions
+      (user_id, license_id, plan_id, provider_subscription_id, billing_type, status)
+    VALUES (?, ?, ?, 'sub_test_4byts', 'PIX', 'pending')
+  `).run(user.lastInsertRowid, billingLicense.lastInsertRowid, billingPlan.lastInsertRowid);
+  const overdueEvent = {
+    id: 'evt_overdue_4byts',
+    event: 'PAYMENT_OVERDUE',
+    payment: {
+      id: 'pay_test_4byts', subscription: 'sub_test_4byts', status: 'OVERDUE',
+      value: 99, dueDate: new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10), billingType: 'PIX'
+    }
+  };
+  const sendWebhook = body => fetch(`${baseUrl}/api/webhooks/asaas`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'asaas-access-token': webhookToken },
+    body: JSON.stringify(body)
+  });
+  const overdueWebhook = await sendWebhook(overdueEvent);
+  assert(overdueWebhook.status === 200, 'Webhook de atraso não foi aceito.');
+  const overdueValidation = await post(baseUrl, '/api/v1/licenses/validate', { activationToken: billingActivation.body.activationToken });
+  assert(overdueValidation.status === 403 && overdueValidation.body.status === 'payment_overdue', 'A licença não foi bloqueada após cinco dias de atraso.');
+  const duplicateWebhook = await sendWebhook(overdueEvent);
+  const duplicatePayload = await duplicateWebhook.json();
+  assert(duplicateWebhook.status === 200 && duplicatePayload.processed === false, 'Webhook duplicado não foi tratado de forma idempotente.');
+  const paidWebhook = await sendWebhook({
+    ...overdueEvent,
+    id: 'evt_received_4byts',
+    event: 'PAYMENT_RECEIVED',
+    payment: { ...overdueEvent.payment, status: 'RECEIVED', paymentDate: new Date().toISOString().slice(0, 10) }
+  });
+  assert(paidWebhook.status === 200, 'Webhook de pagamento não foi aceito.');
+  const paidValidation = await post(baseUrl, '/api/v1/licenses/validate', { activationToken: billingActivation.body.activationToken });
+  assert(paidValidation.status === 200 && paidValidation.body.valid === true, 'O pagamento não reativou a licença automaticamente.');
 
   const deviceLimit = await post(baseUrl, '/api/v1/licenses/activate', {
     licenseKey: '4BYTS-TESTE-0001', instanceId: 'pdv:99888777000166', companyName: 'Outra Empresa', companyDocument: '99888777000166'

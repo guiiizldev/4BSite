@@ -10,6 +10,7 @@ public sealed class FourBytsLicenseService(HttpClient httpClient, FourBytsLicens
         string instanceId,
         string companyName,
         string companyDocument,
+        string sourceIp,
         CancellationToken cancellationToken)
     {
         if (!options.Enabled) return LicenseActivationResult.Development();
@@ -18,16 +19,17 @@ public sealed class FourBytsLicenseService(HttpClient httpClient, FourBytsLicens
             licenseKey,
             instanceId,
             companyName,
-            companyDocument
+            companyDocument,
+            sourceIp
         });
         using var response = await httpClient.SendAsync(request, cancellationToken);
         return await ReadActivationAsync(response, cancellationToken);
     }
 
-    public async Task<LicenseValidationResult> ValidateAsync(string activationToken, CancellationToken cancellationToken)
+    public async Task<LicenseValidationResult> ValidateAsync(string activationToken, string sourceIp, CancellationToken cancellationToken)
     {
         if (!options.Enabled) return LicenseValidationResult.Development();
-        using var request = CreateRequest(HttpMethod.Post, "/api/v1/licenses/validate", new { activationToken });
+        using var request = CreateRequest(HttpMethod.Post, "/api/v1/licenses/validate", new { activationToken, sourceIp });
         using var response = await httpClient.SendAsync(request, cancellationToken);
         var payload = await response.Content.ReadFromJsonAsync<CentralLicenseResponse>(cancellationToken: cancellationToken);
         if (response.IsSuccessStatusCode && payload?.Valid == true && payload.License is not null)

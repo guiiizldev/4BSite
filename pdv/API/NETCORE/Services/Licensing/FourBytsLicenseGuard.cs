@@ -8,7 +8,7 @@ public sealed class FourBytsLicenseGuard(
     FourBytsLicenseOptions options,
     ILogger<FourBytsLicenseGuard> logger)
 {
-    public async Task<LicenseAccessResult> CheckAsync(string companyId, CancellationToken cancellationToken)
+    public async Task<LicenseAccessResult> CheckAsync(string companyId, string sourceIp, CancellationToken cancellationToken)
     {
         if (!options.Enabled) return LicenseAccessResult.Allowed("development");
         var local = store.Get(companyId);
@@ -23,17 +23,18 @@ public sealed class FourBytsLicenseGuard(
                 : $"A licença 4Byts está {local.Status}.";
             return LicenseAccessResult.Denied(message);
         }
-        if (local.LastValidatedAt.AddMinutes(options.ValidationMinutes) > now)
+        if (string.Equals(local.LastClientIp, sourceIp, StringComparison.OrdinalIgnoreCase) &&
+            local.LastValidatedAt.AddMinutes(options.ValidationMinutes) > now)
             return LicenseAccessResult.Allowed(local.Plan);
 
         try
         {
-            var validation = await service.ValidateAsync(local.ActivationToken, cancellationToken);
+            var validation = await service.ValidateAsync(local.ActivationToken, sourceIp, cancellationToken);
             if (validation.License is not null)
             {
                 // Persist revogações e vencimentos imediatamente. Isso impede que uma
                 // licença recusada pela central volte a entrar no período de tolerância.
-                store.SaveValidation(companyId, validation.License);
+                store.SaveValidation(companyId, validation.License, sourceIp);
             }
             if (!validation.Valid || validation.License is null)
             {

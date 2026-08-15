@@ -153,12 +153,16 @@ BEGIN
         MaxDevices INT NOT NULL CONSTRAINT DF_Licencas4Byts_MaxDevices DEFAULT 1,
         ExpiresAt DATETIMEOFFSET NULL,
         ActivationTokenEncrypted NVARCHAR(1000) NOT NULL,
+        LastClientIp NVARCHAR(45) NULL,
         LastValidatedAt DATETIMEOFFSET NOT NULL,
         GraceUntil DATETIMEOFFSET NOT NULL,
         UpdatedAt DATETIMEOFFSET NOT NULL CONSTRAINT DF_Licencas4Byts_UpdatedAt DEFAULT SYSUTCDATETIME(),
         CONSTRAINT FK_Licencas4Byts_Empresas FOREIGN KEY (CompanyId) REFERENCES Empresas (Id) ON DELETE CASCADE
     );
 END;
+
+IF COL_LENGTH(N'Licencas4Byts', N'LastClientIp') IS NULL
+    ALTER TABLE Licencas4Byts ADD LastClientIp NVARCHAR(45) NULL;
 
 GO
 

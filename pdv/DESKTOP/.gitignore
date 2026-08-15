@@ -1,0 +1,8 @@
+node_modules/
+release/
+release-build/
+package-lock.json
+bin/
+obj/
+publish/
+artifacts/

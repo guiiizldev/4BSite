@@ -6,7 +6,7 @@ namespace HORUSPDV_API.Middlewares;
 
 public sealed class FourBytsLicenseMiddleware(RequestDelegate next)
 {
-    public async Task InvokeAsync(HttpContext context, FourBytsLicenseGuard guard)
+    public async Task InvokeAsync(HttpContext context, FourBytsLicenseGuard guard, HorusSecurityOptions securityOptions)
     {
         // Mantém o diagnóstico acessível para uma sessão existente,
         // inclusive quando a central acabou de suspender ou revogar o acesso.
@@ -22,7 +22,8 @@ public sealed class FourBytsLicenseMiddleware(RequestDelegate next)
             return;
         }
 
-        var result = await guard.CheckAsync(currentUser.CompanyId, context.RequestAborted);
+        var sourceIp = HorusClientIpResolver.Resolve(context, securityOptions, "0.0.0.0");
+        var result = await guard.CheckAsync(currentUser.CompanyId, sourceIp, context.RequestAborted);
         if (!result.IsAllowed)
         {
             context.Response.StatusCode = StatusCodes.Status402PaymentRequired;

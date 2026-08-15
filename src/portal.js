@@ -119,6 +119,29 @@ function licenseCard(license) {
 }
 
 const inputDateTime = value => value ? new Date(value).toISOString().slice(0, 16) : '';
+const formatMoney = cents => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(cents || 0) / 100);
+const billingStatusLabel = status => ({ paid: 'Em dia', pending: 'Aguardando pagamento', overdue: 'Em atraso' }[status] || status || 'Não configurada');
+
+function billingPlanForm() {
+  return `<form id="billingPlanForm" class="admin-form">
+    <div class="portal-form-row"><label><span>Código</span><input name="code" placeholder="pdv-mensal" pattern="[a-z0-9-]+" required></label><label><span>Nome</span><input name="name" placeholder="PDV Profissional" required></label></div>
+    <label><span>Produto</span><input name="product" value="4Byts PDV" required></label>
+    <div class="portal-form-row"><label><span>Valor mensal (R$)</span><input type="number" name="price" min="1" step="0.01" placeholder="99,90" required></label><label><span>Ciclo</span><select name="cycle"><option value="MONTHLY">Mensal</option><option value="QUARTERLY">Trimestral</option><option value="SEMIANNUALLY">Semestral</option><option value="YEARLY">Anual</option></select></label></div>
+    <div id="adminFormMessage" class="portal-message" hidden></div><button class="portal-primary" type="submit">Criar plano <span>→</span></button>
+  </form>`;
+}
+
+function subscriptionForm(licenses, plans) {
+  const nextDueDate = new Date().toISOString().slice(0, 10);
+  return `<form id="subscriptionForm" class="admin-form">
+    <label><span>Licença</span><select name="licenseId" required>${licenses.map(license => `<option value="${license.id}">${escapeHtml(license.product)} · ${escapeHtml(license.key)}</option>`).join('')}</select></label>
+    <label><span>Plano</span><select name="planId" required>${plans.map(plan => `<option value="${plan.id}">${escapeHtml(plan.name)} · ${formatMoney(plan.price_cents)}</option>`).join('')}</select></label>
+    <div class="portal-form-row"><label><span>CPF ou CNPJ</span><input name="cpfCnpj" inputmode="numeric" required></label><label><span>Celular</span><input name="phone" inputmode="tel" required></label></div>
+    <div class="portal-form-row"><label><span>Forma de pagamento</span><select name="billingType"><option value="PIX">Pix</option><option value="BOLETO">Boleto</option></select></label><label><span>Primeiro vencimento</span><input type="date" name="nextDueDate" min="${nextDueDate}" value="${nextDueDate}" required></label></div>
+    <p class="billing-note">As próximas cobranças serão geradas automaticamente conforme o ciclo do plano.</p>
+    <div id="subscriptionMessage" class="portal-message" hidden></div><button class="portal-primary" type="submit">Criar assinatura <span>→</span></button>
+  </form>`;
+}
 
 function adminModal(title, content) {
   document.querySelector('#adminModal')?.remove();
@@ -175,6 +198,9 @@ function deviceListContent(license, devices) {
             <span><small>Último acesso</small><b>${escapeHtml(formatDateTime(device.last_seen_at))}</b></span>
             <span><small>IP mais recente</small><b>${escapeHtml(device.last_ip || '—')}</b></span>
           </div>
+          ${!device.released_at && (device.approval_status !== 'approved' || device.requested_ip)
+            ? `<div class="ip-approval"><div><small>${device.approval_status !== 'approved' ? 'Nova máquina aguardando aprovação' : 'Novo IP solicitado'}</small><b>${escapeHtml(device.requested_ip || device.last_ip || '—')}</b></div><button data-approve-ip="${device.id}" type="button">Aprovar máquina e IP</button></div>`
+            : device.ip_enforced ? `<p class="allowed-ips">IPs autorizados: ${escapeHtml(device.allowed_ips || '—')}</p>` : '<p class="allowed-ips legacy">Instalação anterior à trava de IP</p>'}
           ${device.released_at
             ? `<p class="device-released">Liberada em ${escapeHtml(formatDateTime(device.released_at))}${device.released_by_name ? ` por ${escapeHtml(device.released_by_name)}` : ''}</p>`
             : `<button class="device-release" data-release-device="${device.id}" type="button">Liberar instalação</button>`}
@@ -186,7 +212,9 @@ function deviceListContent(license, devices) {
 async function adminDashboard(admin) {
   root.innerHTML = spinner();
   try {
-    const [{ users }, { licenses }] = await Promise.all([api('/api/admin/users'), api('/api/admin/licenses')]);
+    const [{ users }, { licenses }, billing] = await Promise.all([
+      api('/api/admin/users'), api('/api/admin/licenses'), api('/api/admin/billing/plans')
+    ]);
     const activeLicenses = licenses.filter(license => license.status === 'active').length;
     const customerCount = users.filter(user => user.role === 'customer').length;
     root.innerHTML = `
@@ -210,6 +238,29 @@ async function adminDashboard(admin) {
     const sidebar = document.querySelector('.customer-sidebar');
     document.querySelector('.customer-menu').addEventListener('click', () => sidebar.classList.toggle('open'));
     document.querySelector('#logoutButton').addEventListener('click', async () => { await api('/api/auth/logout', { method: 'POST' }); authScreen(); });
+    document.querySelector('#newUser').insertAdjacentHTML('beforebegin', '<button id="newBillingPlan" class="portal-secondary">+ Criar plano</button>');
+    document.querySelector('.customer-metrics').insertAdjacentHTML('afterend', `
+      <section class="admin-section billing-admin-section">
+        <div class="licenses-heading"><div><h2>Planos e cobranças</h2><p>Valores usados nas assinaturas recorrentes do Asaas.</p></div><span class="provider-state ${billing.providerConfigured ? 'ready' : ''}">${billing.providerConfigured ? 'Asaas configurado' : 'Asaas aguardando configuração'}</span></div>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Plano</th><th>Produto</th><th>Ciclo</th><th>Valor</th><th>Status</th></tr></thead><tbody>${billing.plans.length ? billing.plans.map(plan => `<tr><td><b>${escapeHtml(plan.name)}</b><small>${escapeHtml(plan.code)}</small></td><td>${escapeHtml(plan.product)}</td><td>${escapeHtml(plan.cycle)}</td><td><b>${formatMoney(plan.price_cents)}</b></td><td>${plan.active ? 'Ativo' : 'Inativo'}</td></tr>`).join('') : '<tr><td colspan="5" class="admin-empty">Crie o primeiro plano comercial do 4Byts PDV.</td></tr>'}</tbody></table></div>
+      </section>`);
+    const openBillingPlan = () => {
+      const modal = adminModal('Criar plano de cobrança', billingPlanForm());
+      modal.querySelector('#billingPlanForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const values = Object.fromEntries(new FormData(form));
+        const message = form.querySelector('#adminFormMessage');
+        values.priceCents = Math.round(Number(values.price) * 100);
+        values.active = true;
+        delete values.price;
+        try {
+          await api('/api/admin/billing/plans', { method: 'POST', body: JSON.stringify(values) });
+          modal.remove();
+          await adminDashboard(admin);
+        } catch (error) { showMessage(message, error.message); }
+      });
+    };
     const openUser = user => {
       const modal = adminModal(user?.id ? 'Editar conta' : 'Criar conta', userForm(user));
       modal.querySelector('#adminUserForm').addEventListener('submit', async event => {
@@ -232,6 +283,20 @@ async function adminDashboard(admin) {
         const card = modal.querySelector('.admin-modal-card');
         card.querySelector(':scope > h2').insertAdjacentHTML('afterend', deviceListContent(result.license, result.devices));
         card.querySelector('.compact-loading').remove();
+        card.querySelectorAll('[data-approve-ip]').forEach(button => button.addEventListener('click', async () => {
+          const device = result.devices.find(item => item.id === Number(button.dataset.approveIp));
+          const requestedIp = device?.requested_ip || device?.last_ip;
+          if (!confirm(`Autorizar esta máquina a utilizar o IP ${requestedIp}?`)) return;
+          const message = card.querySelector('#deviceModalMessage');
+          button.disabled = true;
+          try {
+            const approved = await api(`/api/admin/licenses/${license.id}/devices/${device.id}/approve-ip`, {
+              method: 'PATCH', body: JSON.stringify({ ip: requestedIp })
+            });
+            showMessage(message, approved.message, 'success');
+            setTimeout(() => { modal.remove(); adminDashboard(admin); }, 900);
+          } catch (error) { showMessage(message, error.message); button.disabled = false; }
+        }));
         card.querySelectorAll('[data-release-device]').forEach(button => button.addEventListener('click', async () => {
           const device = result.devices.find(item => item.id === Number(button.dataset.releaseDevice));
           if (!confirm(`Liberar a instalação "${device?.device_name || 'sem nome'}"? O PDV perderá o acesso na próxima validação.`)) return;
@@ -250,6 +315,7 @@ async function adminDashboard(admin) {
         modal.querySelector('.compact-loading').innerHTML = `<span>${escapeHtml(error.message)}</span>`;
       }
     };
+    document.querySelector('#newBillingPlan').addEventListener('click', openBillingPlan);
     document.querySelector('#newUser').addEventListener('click', () => openUser());
     document.querySelector('#newLicense').addEventListener('click', () => openLicense());
     document.querySelectorAll('[data-edit-user]').forEach(button => button.addEventListener('click', () => openUser(users.find(user => user.id === Number(button.dataset.editUser)))));
@@ -265,7 +331,9 @@ async function dashboard() {
   try {
     const { user } = await api('/api/auth/me');
     if (user.role === 'admin') return adminDashboard(user);
-    const { licenses } = await api('/api/licenses');
+    const [{ licenses }, billing, planData] = await Promise.all([
+      api('/api/licenses'), api('/api/billing'), api('/api/billing/plans')
+    ]);
     const activeLicenses = licenses.filter(license => license.status === 'active').length;
     const deviceCount = licenses.reduce((total, license) => total + license.deviceCount, 0);
     root.innerHTML = `
@@ -293,6 +361,52 @@ async function dashboard() {
     const sidebar = document.querySelector('.customer-sidebar');
     document.querySelector('.customer-menu').addEventListener('click', () => sidebar.classList.toggle('open'));
     document.querySelector('#logoutButton').addEventListener('click', async () => { await api('/api/auth/logout', { method: 'POST' }); authScreen(); });
+    const currentPayment = billing.payments[0];
+    const billingSection = billing.subscription ? `
+      <section class="billing-section">
+        <div class="licenses-heading"><div><h2>Assinatura e pagamentos</h2><p>Acompanhe sua mensalidade do 4Byts PDV.</p></div><button id="syncBilling" class="admin-edit">Atualizar situação</button></div>
+        <div class="billing-overview">
+          <article><small>Plano</small><strong>${escapeHtml(billing.subscription.plan_name)}</strong><span>${formatMoney(billing.subscription.price_cents)} · ${escapeHtml(billing.subscription.billing_type)}</span></article>
+          <article><small>Situação</small><strong class="billing-${escapeHtml(billing.subscription.billing_status)}">${escapeHtml(billingStatusLabel(billing.subscription.billing_status))}</strong><span>${billing.subscription.billing_grace_until ? `Carência até ${escapeHtml(formatDate(billing.subscription.billing_grace_until))}` : 'Sem pendências vencidas'}</span></article>
+          <article><small>Próximo vencimento</small><strong>${escapeHtml(formatDate(billing.subscription.next_due_date))}</strong><span>Cobrança recorrente</span></article>
+        </div>
+        ${currentPayment ? `<div class="payment-card">
+          <div><span class="license-status ${currentPayment.status === 'OVERDUE' ? 'expired' : ''}">${escapeHtml(currentPayment.status)}</span><h3>${formatMoney(currentPayment.valueCents)}</h3><p>Vencimento: ${escapeHtml(formatDate(currentPayment.dueDate))}</p>
+          <div class="payment-actions">${currentPayment.invoiceUrl ? `<a href="${escapeHtml(currentPayment.invoiceUrl)}" target="_blank" rel="noopener">Abrir fatura</a>` : ''}${currentPayment.bankSlipUrl ? `<a href="${escapeHtml(currentPayment.bankSlipUrl)}" target="_blank" rel="noopener">Abrir boleto</a>` : ''}${currentPayment.pixPayload ? '<button id="copyPix">Copiar código Pix</button>' : ''}</div></div>
+          ${currentPayment.pixEncodedImage ? `<img src="data:image/png;base64,${escapeHtml(currentPayment.pixEncodedImage)}" alt="QR Code Pix">` : ''}
+        </div>` : '<div class="admin-empty">A primeira cobrança está sendo preparada.</div>'}
+      </section>` : `
+      <section class="billing-section billing-start">
+        <div><span class="portal-kicker">PAGAMENTOS</span><h2>Ative sua cobrança recorrente</h2><p>Escolha Pix ou boleto. A mensalidade é gerada automaticamente e fica disponível neste painel.</p></div>
+        <button id="startSubscription" class="portal-primary compact" ${!licenses.length || !planData.plans.length || !planData.providerConfigured ? 'disabled' : ''}>Configurar pagamento <span>→</span></button>
+        ${!planData.providerConfigured ? '<small>O administrador ainda precisa conectar a conta Asaas.</small>' : !planData.plans.length ? '<small>Nenhum plano comercial disponível.</small>' : ''}
+      </section>`;
+    document.querySelector('.licenses-section').insertAdjacentHTML('afterend', billingSection);
+    document.querySelector('#startSubscription')?.addEventListener('click', () => {
+      const modal = adminModal('Configurar pagamento', subscriptionForm(licenses, planData.plans));
+      modal.querySelector('#subscriptionForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const values = Object.fromEntries(new FormData(form));
+        const message = form.querySelector('#subscriptionMessage');
+        values.licenseId = Number(values.licenseId);
+        values.planId = Number(values.planId);
+        try {
+          await api('/api/billing/subscribe', { method: 'POST', body: JSON.stringify(values) });
+          modal.remove();
+          await dashboard();
+        } catch (error) { showMessage(message, error.message); }
+      });
+    });
+    document.querySelector('#syncBilling')?.addEventListener('click', async event => {
+      event.currentTarget.disabled = true;
+      try { await api('/api/billing/sync', { method: 'POST' }); await dashboard(); }
+      catch (error) { alert(error.message); event.currentTarget.disabled = false; }
+    });
+    document.querySelector('#copyPix')?.addEventListener('click', async event => {
+      await navigator.clipboard.writeText(currentPayment.pixPayload);
+      event.currentTarget.textContent = 'Pix copiado ✓';
+    });
     const claimPanel = document.querySelector('#claimPanel');
     const openClaim = () => { claimPanel.hidden = false; claimPanel.querySelector('input').focus(); };
     document.querySelector('#claimToggle').addEventListener('click', () => claimPanel.hidden ? openClaim() : claimPanel.hidden = true);

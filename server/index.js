@@ -4,8 +4,10 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { isIP } from 'node:net';
 import { z } from 'zod';
 import { clearSessionCookie, createSession, destroySession, publicUser, requireAdmin, requireAuth, setSessionCookie } from './auth.js';
+import { billingRouter, financialLicenseStatus } from './billing.js';
 import { cleanupExpiredSessions, db } from './db.js';
 
 const app = express();
@@ -52,6 +54,11 @@ const activationLimiter = rateLimit({
 
 const hashActivationToken = token => createHash('sha256').update(token).digest('hex');
 const digitsOnly = value => String(value || '').replace(/\D/g, '');
+const requiresIpApproval = process.env.LICENSE_REQUIRE_IP_APPROVAL !== 'false';
+const normalizeIp = value => {
+  const normalized = String(value || '').trim().replace(/^::ffff:/, '');
+  return isIP(normalized) ? normalized : '';
+};
 
 function requireLicenseService(request, response, next) {
   const expected = process.env.LICENSE_SERVICE_API_KEY || '';
@@ -69,11 +76,13 @@ const activationSchema = z.object({
   licenseKey: z.string().trim().min(8).max(100).transform(value => value.toUpperCase()),
   instanceId: z.string().trim().min(8).max(120),
   companyName: z.string().trim().min(2).max(160),
-  companyDocument: z.string().transform(digitsOnly).refine(value => value.length === 14)
+  companyDocument: z.string().transform(digitsOnly).refine(value => value.length === 14),
+  sourceIp: z.string().trim().max(45).optional()
 });
 
 const validationSchema = z.object({
-  activationToken: z.string().trim().min(32).max(200)
+  activationToken: z.string().trim().min(32).max(200),
+  sourceIp: z.string().trim().max(45).optional()
 });
 
 function licenseEntitlement(license) {
@@ -83,7 +92,9 @@ function licenseEntitlement(license) {
     plan: license.plan,
     status: license.status,
     maxDevices: license.max_devices,
-    expiresAt: license.expires_at
+    expiresAt: license.expires_at,
+    billingStatus: license.billing_status,
+    billingGraceUntil: license.billing_grace_until
   };
 }
 
@@ -92,6 +103,7 @@ function effectiveLicenseStatus(license) {
     db.prepare("UPDATE licenses SET status = 'expired' WHERE id = ?").run(license.id);
     return 'expired';
   }
+  if (license.status === 'active') return financialLicenseStatus(license) || license.status;
   return license.status;
 }
 
@@ -136,6 +148,8 @@ const adminLicenseUpdateSchema = z.object({
   expiresAt: z.union([z.string().datetime(), z.null()]).optional()
 });
 
+app.use('/api', billingRouter);
+
 app.get('/api/health', (_request, response) => {
   response.json({ status: 'ok', service: '4byts-api', time: new Date().toISOString() });
 });
@@ -149,10 +163,36 @@ app.post('/api/v1/licenses/activate', activationLimiter, requireLicenseService, 
   if (status !== 'active') return response.status(403).json({ error: `Licença ${status}.`, status });
   if (!license.product.toLowerCase().includes('pdv')) return response.status(409).json({ error: 'Esta licença não pertence ao 4Byts PDV.' });
 
+  const clientIp = normalizeIp(parsed.data.sourceIp) || normalizeIp(request.ip);
   const existing = db.prepare('SELECT * FROM devices WHERE license_id = ? AND device_id = ?').get(license.id, parsed.data.instanceId);
   const activeDevices = db.prepare('SELECT COUNT(*) AS count FROM devices WHERE license_id = ? AND released_at IS NULL').get(license.id).count;
   if ((!existing || existing.released_at) && activeDevices >= license.max_devices) {
     return response.status(409).json({ error: 'Limite de instalações atingido para esta licença.' });
+  }
+
+  if (!existing && requiresIpApproval) {
+    db.prepare(`
+      INSERT INTO devices
+        (license_id, device_id, device_name, company_document, last_ip, requested_ip, approval_status, ip_enforced)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', 1)
+    `).run(license.id, parsed.data.instanceId, parsed.data.companyName, parsed.data.companyDocument, clientIp, clientIp);
+    return response.status(403).json({
+      error: 'Instalação enviada para aprovação. O administrador precisa liberar esta máquina e seu IP.',
+      status: 'pending_approval'
+    });
+  }
+  if (existing && existing.approval_status !== 'approved') {
+    db.prepare("UPDATE devices SET requested_ip = ?, last_ip = ?, last_seen_at = datetime('now') WHERE id = ?")
+      .run(clientIp, clientIp, existing.id);
+    return response.status(403).json({ error: 'Esta instalação está aguardando aprovação do administrador.', status: 'pending_approval' });
+  }
+  if (existing?.ip_enforced) {
+    const allowed = db.prepare('SELECT 1 FROM device_allowed_ips WHERE device_id = ? AND ip_address = ?').get(existing.id, clientIp);
+    if (!allowed) {
+      db.prepare("UPDATE devices SET requested_ip = ?, last_ip = ?, last_seen_at = datetime('now') WHERE id = ?")
+        .run(clientIp, clientIp, existing.id);
+      return response.status(403).json({ error: 'IP ainda não autorizado para esta instalação.', status: 'ip_not_allowed' });
+    }
   }
 
   const activationToken = randomBytes(48).toString('base64url');
@@ -161,12 +201,12 @@ app.post('/api/v1/licenses/activate', activationLimiter, requireLicenseService, 
     db.prepare(`
       UPDATE devices SET device_name = ?, company_document = ?, activation_token_hash = ?,
         last_seen_at = datetime('now'), activated_at = datetime('now'), last_ip = ?, released_at = NULL, released_by = NULL WHERE id = ?
-    `).run(parsed.data.companyName, parsed.data.companyDocument, tokenHash, request.ip, existing.id);
+    `).run(parsed.data.companyName, parsed.data.companyDocument, tokenHash, clientIp, existing.id);
   } else {
     db.prepare(`
       INSERT INTO devices (license_id, device_id, device_name, company_document, activation_token_hash, last_ip)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(license.id, parsed.data.instanceId, parsed.data.companyName, parsed.data.companyDocument, tokenHash, request.ip);
+    `).run(license.id, parsed.data.instanceId, parsed.data.companyName, parsed.data.companyDocument, tokenHash, clientIp);
   }
   db.prepare("UPDATE licenses SET activated_at = COALESCE(activated_at, datetime('now')) WHERE id = ?").run(license.id);
   response.status(existing ? 200 : 201).json({ activationToken, license: licenseEntitlement({ ...license, status }) });
@@ -176,13 +216,20 @@ app.post('/api/v1/licenses/validate', activationLimiter, requireLicenseService, 
   const parsed = validationSchema.safeParse(request.body);
   if (!parsed.success) return response.status(400).json({ error: 'Token de ativação inválido.' });
   const device = db.prepare(`
-    SELECT devices.id AS device_row_id, devices.device_id, devices.company_document, licenses.*
+    SELECT devices.id AS device_row_id, devices.device_id, devices.company_document,
+      devices.approval_status, devices.ip_enforced, licenses.*
     FROM devices JOIN licenses ON licenses.id = devices.license_id
     WHERE devices.activation_token_hash = ? AND devices.released_at IS NULL
   `).get(hashActivationToken(parsed.data.activationToken));
   if (!device) return response.status(401).json({ valid: false, error: 'Ativação não encontrada.' });
+  const clientIp = normalizeIp(parsed.data.sourceIp) || normalizeIp(request.ip);
   const status = effectiveLicenseStatus(device);
-  db.prepare("UPDATE devices SET last_seen_at = datetime('now'), last_ip = ? WHERE id = ?").run(request.ip, device.device_row_id);
+  db.prepare("UPDATE devices SET last_seen_at = datetime('now'), last_ip = ? WHERE id = ?").run(clientIp, device.device_row_id);
+  if (device.approval_status !== 'approved') return response.status(403).json({ valid: false, status: 'pending_approval', error: 'Instalação aguardando aprovação.' });
+  if (device.ip_enforced && !db.prepare('SELECT 1 FROM device_allowed_ips WHERE device_id = ? AND ip_address = ?').get(device.device_row_id, clientIp)) {
+    db.prepare('UPDATE devices SET requested_ip = ? WHERE id = ?').run(clientIp, device.device_row_id);
+    return response.status(403).json({ valid: false, status: 'ip_not_allowed', error: 'IP não autorizado para esta instalação.' });
+  }
   if (status !== 'active') return response.status(403).json({ valid: false, status, license: licenseEntitlement({ ...device, status }) });
   response.json({ valid: true, license: licenseEntitlement({ ...device, status }) });
 });
@@ -312,13 +359,36 @@ app.get('/api/admin/licenses/:id/devices', requireAuth, requireAdmin, (request, 
   if (!license) return response.status(404).json({ error: 'Licença não encontrada.' });
   const devices = db.prepare(`
     SELECT devices.id, devices.device_id, devices.device_name, devices.company_document,
-      devices.last_seen_at, devices.activated_at, devices.last_ip, devices.released_at,
+      devices.last_seen_at, devices.activated_at, devices.last_ip, devices.requested_ip,
+      devices.approval_status, devices.ip_enforced, devices.approved_at, devices.released_at,
+      (SELECT GROUP_CONCAT(ip_address, ', ') FROM device_allowed_ips WHERE device_id = devices.id) AS allowed_ips,
       users.name AS released_by_name
     FROM devices LEFT JOIN users ON users.id = devices.released_by
     WHERE devices.license_id = ?
     ORDER BY devices.released_at IS NULL DESC, devices.last_seen_at DESC
   `).all(licenseId);
   response.json({ license, devices });
+});
+
+app.patch('/api/admin/licenses/:licenseId/devices/:deviceId/approve-ip', requireAuth, requireAdmin, (request, response) => {
+  const licenseId = Number(request.params.licenseId);
+  const deviceId = Number(request.params.deviceId);
+  const device = db.prepare('SELECT * FROM devices WHERE id = ? AND license_id = ? AND released_at IS NULL').get(deviceId, licenseId);
+  if (!device) return response.status(404).json({ error: 'Instalação ativa não encontrada.' });
+  const requestedIp = normalizeIp(request.body?.ip) || normalizeIp(device.requested_ip) || normalizeIp(device.last_ip);
+  if (!requestedIp) return response.status(400).json({ error: 'Nenhum IP válido foi informado pela instalação.' });
+  const approve = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO device_allowed_ips (device_id, ip_address, approved_by) VALUES (?, ?, ?)
+      ON CONFLICT(device_id, ip_address) DO UPDATE SET approved_by = excluded.approved_by, approved_at = datetime('now')
+    `).run(deviceId, requestedIp, request.user.id);
+    db.prepare(`
+      UPDATE devices SET approval_status = 'approved', ip_enforced = 1, approved_at = datetime('now'),
+        approved_by = ?, requested_ip = NULL WHERE id = ?
+    `).run(request.user.id, deviceId);
+  });
+  approve();
+  response.json({ message: `Máquina e IP ${requestedIp} autorizados.`, ip: requestedIp });
 });
 
 app.patch('/api/admin/licenses/:licenseId/devices/:deviceId/release', requireAuth, requireAdmin, (request, response) => {
