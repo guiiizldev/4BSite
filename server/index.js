@@ -182,14 +182,14 @@ app.post('/api/v1/licenses/activate', activationLimiter, requireLicenseService, 
     });
   }
   if (existing && existing.approval_status !== 'approved') {
-    db.prepare("UPDATE devices SET requested_ip = ?, last_ip = ?, last_seen_at = datetime('now') WHERE id = ?")
+    db.prepare("UPDATE devices SET requested_ip = ?, last_ip = ?, last_seen_at = datetime('now'), released_at = NULL, released_by = NULL WHERE id = ?")
       .run(clientIp, clientIp, existing.id);
     return response.status(403).json({ error: 'Esta instalação está aguardando aprovação do administrador.', status: 'pending_approval' });
   }
   if (existing?.ip_enforced) {
     const allowed = db.prepare('SELECT 1 FROM device_allowed_ips WHERE device_id = ? AND ip_address = ?').get(existing.id, clientIp);
     if (!allowed) {
-      db.prepare("UPDATE devices SET requested_ip = ?, last_ip = ?, last_seen_at = datetime('now') WHERE id = ?")
+      db.prepare("UPDATE devices SET requested_ip = ?, last_ip = ?, last_seen_at = datetime('now'), released_at = NULL, released_by = NULL WHERE id = ?")
         .run(clientIp, clientIp, existing.id);
       return response.status(403).json({ error: 'IP ainda não autorizado para esta instalação.', status: 'ip_not_allowed' });
     }

@@ -13,6 +13,7 @@ export type LoginPayload = {
   password: string;
   rememberMe: boolean;
   recaptchaToken?: string;
+  licenseKey?: string;
 };
 
 export type LoginResponse = {

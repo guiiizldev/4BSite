@@ -70,13 +70,61 @@ public class AuthController(
         var licenseAccess = await licenseGuard.CheckAsync(result.User.CompanyId, ip, HttpContext.RequestAborted);
         if (!licenseAccess.IsAllowed)
         {
-            securityStore.TerminateCurrentSession(result.Session.Id);
-            return StatusCode(StatusCodes.Status402PaymentRequired, new ApiResponse<object>
+            if (!string.IsNullOrWhiteSpace(request.LicenseKey))
             {
-                Success = false,
-                Message = licenseAccess.Message,
-                Data = new { licenseRequired = true }
-            });
+                var company = securityStore.GetCompanyLicenseIdentity(result.User.CompanyId);
+                if (company is null || string.IsNullOrWhiteSpace(company.Cnpj))
+                {
+                    securityStore.TerminateCurrentSession(result.Session.Id);
+                    return BadRequest(new ApiResponse<object>
+                    {
+                        Success = false,
+                        Message = "Não foi possível identificar a empresa para reativar a licença."
+                    });
+                }
+
+                try
+                {
+                    var activation = await licenseService.ActivateAsync(
+                        request.LicenseKey,
+                        $"pdv:{company.Cnpj}",
+                        company.Name,
+                        company.Cnpj,
+                        ip,
+                        HttpContext.RequestAborted);
+                    if (!activation.Success)
+                    {
+                        securityStore.TerminateCurrentSession(result.Session.Id);
+                        return StatusCode(StatusCodes.Status402PaymentRequired, new ApiResponse<object>
+                        {
+                            Success = false,
+                            Message = activation.Error,
+                            Data = new { licenseRequired = true, reactivationRequired = true }
+                        });
+                    }
+                    licenseStore.SaveActivation(result.User.CompanyId, activation, ip);
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+                {
+                    securityStore.TerminateCurrentSession(result.Session.Id);
+                    logger.LogWarning(ex, "Central de licenças indisponível durante a reativação da empresa {CompanyId}.", result.User.CompanyId);
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, new ApiResponse<object>
+                    {
+                        Success = false,
+                        Message = "A central de licenças está temporariamente indisponível. Tente novamente."
+                    });
+                }
+            }
+            else
+            {
+                securityStore.TerminateCurrentSession(result.Session.Id);
+                return StatusCode(StatusCodes.Status402PaymentRequired, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = licenseAccess.Message,
+                    Data = new { licenseRequired = true, reactivationRequired = licenseAccess.Message.Contains("Ative o PDV novamente") }
+                });
+            }
         }
 
         var token = jwtService.CreateToken(result.User, result.Session, ip);

@@ -394,6 +394,7 @@ export default function App() {
     password: string,
     remember: boolean,
     recaptchaToken?: string,
+    licenseKey?: string,
   ) => {
     try {
       const result = await authService.login({
@@ -401,6 +402,7 @@ export default function App() {
         password,
         rememberMe: remember,
         recaptchaToken,
+        licenseKey: licenseKey?.trim().toUpperCase(),
       });
 
       if (!result) {

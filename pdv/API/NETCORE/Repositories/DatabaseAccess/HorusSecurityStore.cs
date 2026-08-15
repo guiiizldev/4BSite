@@ -14,6 +14,22 @@ namespace HORUSPDV_API.Repositories.DatabaseAccess;
 
 public class HorusSecurityStore(Connection connection, HorusSecurityOptions securityOptions)
 {
+    public CompanyLicenseIdentity? GetCompanyLicenseIdentity(string companyId)
+    {
+        using var db = connection.OpenConnection();
+        using var command = new SqlCommand(
+            "SELECT FantasyName, CorporateName, Cnpj FROM Empresas WHERE Id = @CompanyId;",
+            db);
+        command.Parameters.AddWithValue("@CompanyId", companyId);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return null;
+        var fantasyName = ReadString(reader, "FantasyName");
+        var corporateName = ReadString(reader, "CorporateName");
+        return new CompanyLicenseIdentity(
+            string.IsNullOrWhiteSpace(fantasyName) ? corporateName : fantasyName,
+            OnlyDigits(ReadString(reader, "Cnpj")));
+    }
+
     private const int MaxFailedAttempts = 5;
     private static readonly TimeSpan AttemptWindow = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(10);
@@ -1029,6 +1045,8 @@ public class HorusSecurityStore(Connection connection, HorusSecurityOptions secu
         Platform = source.Platform
     };
 }
+
+public sealed record CompanyLicenseIdentity(string Name, string Cnpj);
 
 public class SecurityUserDto
 {

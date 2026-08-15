@@ -3,7 +3,7 @@
  * Objetivo: renderiza autenticação do usuário e inicialização da sessão no frontend.
  * Entradas esperadas: recebe callbacks de sucesso e navegação para cadastro/recuperação.
  */
-import { LogIn } from "lucide-react";
+import { KeyRound, LogIn } from "lucide-react";
 import { useState } from "react";
 import useRecaptchaV3 from "@/hooks/Security/useRecaptchaV3";
 import AuthLayout from "./AuthLayout";
@@ -17,6 +17,7 @@ type LoginPageProps = {
     password: string,
     remember: boolean,
     recaptchaToken?: string,
+    licenseKey?: string,
   ) => Promise<AuthActionResult>;
   onOpenForgotPassword: () => void;
   onOpenRegister: () => void;
@@ -32,6 +33,8 @@ export default function LoginPage({
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
+  const [licenseKey, setLicenseKey] = useState("");
+  const [reactivationRequired, setReactivationRequired] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<AuthActionResult | null>(null);
 
@@ -39,10 +42,12 @@ export default function LoginPage({
     isRecaptchaConfigured ? executeRecaptcha("login") : Promise.resolve("");
 
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
+    if (!email.trim() || !password.trim() || (reactivationRequired && !licenseKey.trim())) {
       setFeedback({
         success: false,
-        message: "Informe e-mail e senha para entrar.",
+        message: reactivationRequired
+          ? "Informe a chave da licença para reativar esta instalação."
+          : "Informe e-mail e senha para entrar.",
       });
       return;
     }
@@ -50,7 +55,16 @@ export default function LoginPage({
     setIsSubmitting(true);
     try {
       const recaptchaToken = await runRecaptcha();
-      setFeedback(await onLogin(email, password, remember, recaptchaToken));
+      const result = await onLogin(email, password, remember, recaptchaToken, licenseKey);
+      if (!result.success && result.message.includes("Ative o PDV novamente")) {
+        setReactivationRequired(true);
+        setFeedback({
+          success: false,
+          message: "Esta máquina precisa ser reativada. Informe abaixo a chave da licença e tente novamente.",
+        });
+      } else {
+        setFeedback(result);
+      }
     } catch (error) {
       setFeedback(
         toErrorResult(
@@ -77,6 +91,34 @@ export default function LoginPage({
         onToggle={() => setShowPassword((current) => !current)}
         onEnter={handleLogin}
       />
+
+      {reactivationRequired && (
+        <label className="block rounded-xl border border-accent/30 bg-accent/5 p-3">
+          <span className="mb-1 block text-sm font-semibold text-text-primary">
+            Chave da licença para reativação
+          </span>
+          <div className="relative">
+            <KeyRound
+              size={16}
+              className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-accent"
+            />
+            <input
+              type="text"
+              className="input-field w-full pl-10 font-mono uppercase"
+              value={licenseKey}
+              onChange={(event) => setLicenseKey(event.target.value.toUpperCase())}
+              placeholder="4B-PDV-XXXXXX-XXXXXX"
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void handleLogin();
+              }}
+            />
+          </div>
+          <small className="mt-2 block text-xs text-text-secondary">
+            Use a mesma chave vinculada à empresa. Se o IP mudou, uma nova aprovação será solicitada.
+          </small>
+        </label>
+      )}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <label className="flex items-center gap-2 text-sm text-text-secondary">
@@ -105,7 +147,7 @@ export default function LoginPage({
         className="btn-primary inline-flex min-h-11 w-full items-center justify-center gap-2"
       >
         <LogIn size={16} />
-        Entrar
+        {reactivationRequired ? "Reativar e entrar" : "Entrar"}
       </LoadingButton>
 
       <div className="flex flex-wrap items-center justify-center gap-2 text-sm text-text-secondary">
