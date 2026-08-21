@@ -497,8 +497,8 @@ public class AuthController(
     {
         var rawDeviceId = Request.Headers["X-4Byts-Device-Id"].ToString().Trim();
         return Guid.TryParse(rawDeviceId, out var deviceId)
-            ? $"pdv:{cnpj}:{deviceId:N}"
-            : $"pdv:{cnpj}";
+            ? $"food:{cnpj}:{deviceId:N}"
+            : $"food:{cnpj}";
     }
 
     private string GetInstallationName(string fallback)
