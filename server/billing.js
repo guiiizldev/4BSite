@@ -16,6 +16,10 @@ const subscribeSchema = billingProfileSchema.extend({
   billingType: z.enum(['PIX', 'BOLETO']),
   nextDueDate: z.string().date()
 });
+const subscriptionSettingsSchema = z.object({
+  billingType: z.enum(['PIX', 'BOLETO']),
+  autoRenew: z.boolean()
+});
 const planSchema = z.object({
   code: z.string().trim().min(2).max(40).regex(/^[a-z0-9-]+$/),
   name: z.string().trim().min(2).max(80),
@@ -151,22 +155,36 @@ async function ensureProviderCustomer(user, profile) {
 }
 
 function customerBilling(userId) {
-  const subscription = db.prepare(`
+  const profile = db.prepare(`
+    SELECT cpf_cnpj AS cpfCnpj, phone, updated_at AS updatedAt
+      FROM billing_profiles WHERE user_id = ?
+  `).get(userId) || null;
+  const subscriptions = db.prepare(`
     SELECT subscriptions.*, plans.code AS plan_code, plans.name AS plan_name, plans.product,
-      plans.price_cents, plans.cycle, licenses.license_key, licenses.billing_status, licenses.billing_grace_until
+      plans.price_cents, plans.cycle, licenses.license_key, licenses.billing_status, licenses.billing_grace_until,
+      licenses.product_code
     FROM billing_subscriptions subscriptions
     JOIN billing_plans plans ON plans.id = subscriptions.plan_id
     JOIN licenses ON licenses.id = subscriptions.license_id
-    WHERE subscriptions.user_id = ? ORDER BY subscriptions.created_at DESC LIMIT 1
-  `).get(userId);
-  if (!subscription) return { subscription: null, payments: [] };
-  const payments = db.prepare(`
-    SELECT provider_payment_id AS id, status, value_cents AS valueCents, due_date AS dueDate,
+    WHERE subscriptions.user_id = ? ORDER BY subscriptions.created_at DESC
+  `).all(userId);
+  const paymentQuery = db.prepare(`
+    SELECT subscription_id AS subscriptionId, provider_payment_id AS id, status, value_cents AS valueCents, due_date AS dueDate,
       paid_at AS paidAt, invoice_url AS invoiceUrl, bank_slip_url AS bankSlipUrl,
       pix_payload AS pixPayload, pix_encoded_image AS pixEncodedImage
     FROM billing_payments WHERE subscription_id = ? ORDER BY due_date DESC
-  `).all(subscription.id);
-  return { subscription, payments };
+  `);
+  const contracts = subscriptions.map(subscription => ({
+    ...subscription,
+    autoRenew: subscription.auto_renew !== 0,
+    payments: paymentQuery.all(subscription.id)
+  }));
+  return {
+    profile,
+    subscriptions: contracts,
+    subscription: contracts[0] || null,
+    payments: contracts.flatMap(subscription => subscription.payments)
+  };
 }
 
 export const billingRouter = Router();
@@ -184,14 +202,32 @@ billingRouter.get('/billing', requireAuth, (request, response) => {
   response.json(customerBilling(request.user.id));
 });
 
-billingRouter.put('/billing/profile', requireAuth, (request, response) => {
+billingRouter.put('/billing/profile', requireAuth, async (request, response, next) => {
   const parsed = billingProfileSchema.safeParse(request.body);
   if (!parsed.success) return response.status(400).json({ error: 'Informe CPF/CNPJ e telefone válidos.' });
-  db.prepare(`
-    INSERT INTO billing_profiles (user_id, cpf_cnpj, phone) VALUES (?, ?, ?)
-    ON CONFLICT(user_id) DO UPDATE SET cpf_cnpj = excluded.cpf_cnpj, phone = excluded.phone, updated_at = datetime('now')
-  `).run(request.user.id, parsed.data.cpfCnpj, parsed.data.phone);
-  response.json({ message: 'Dados de cobrança atualizados.' });
+  try {
+    const current = db.prepare('SELECT * FROM billing_profiles WHERE user_id = ?').get(request.user.id);
+    if (current?.provider_customer_id && asaasConfigured()) {
+      await asaasRequest(`/customers/${encodeURIComponent(current.provider_customer_id)}`, {
+        method: 'PUT',
+        body: {
+          name: request.user.company || request.user.name,
+          cpfCnpj: parsed.data.cpfCnpj,
+          email: request.user.email,
+          mobilePhone: parsed.data.phone
+        }
+      });
+    }
+    db.prepare(`
+      INSERT INTO billing_profiles (user_id, cpf_cnpj, phone) VALUES (?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET cpf_cnpj = excluded.cpf_cnpj, phone = excluded.phone, updated_at = datetime('now')
+    `).run(request.user.id, parsed.data.cpfCnpj, parsed.data.phone);
+    auditAction(request.user.id, 'update_billing_profile', 'user', request.user.id, 'Cliente atualizou os dados de cobrança');
+    response.json({ message: 'Dados de cobrança atualizados.' });
+  } catch (error) {
+    if (error instanceof AsaasError) return response.status(error.status >= 500 ? 502 : 400).json({ error: error.message });
+    next(error);
+  }
 });
 
 billingRouter.post('/billing/subscribe', requireAuth, async (request, response, next) => {
@@ -244,10 +280,49 @@ billingRouter.post('/billing/subscribe', requireAuth, async (request, response, 
 });
 
 billingRouter.post('/billing/sync', requireAuth, async (request, response, next) => {
-  const subscription = db.prepare('SELECT * FROM billing_subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1').get(request.user.id);
-  if (!subscription) return response.status(404).json({ error: 'Assinatura não encontrada.' });
+  const parsed = z.object({ subscriptionId: z.number().int().positive().optional() }).safeParse(request.body || {});
+  if (!parsed.success) return response.status(400).json({ error: 'Assinatura inválida.' });
+  const subscriptions = parsed.data.subscriptionId
+    ? db.prepare('SELECT * FROM billing_subscriptions WHERE id = ? AND user_id = ?').all(parsed.data.subscriptionId, request.user.id)
+    : db.prepare('SELECT * FROM billing_subscriptions WHERE user_id = ?').all(request.user.id);
+  if (!subscriptions.length) return response.status(404).json({ error: 'Assinatura não encontrada.' });
   try {
-    await syncSubscriptionPayments(subscription);
+    for (const subscription of subscriptions) await syncSubscriptionPayments(subscription);
+    response.json(customerBilling(request.user.id));
+  } catch (error) {
+    if (error instanceof AsaasError) return response.status(error.status >= 500 ? 502 : 400).json({ error: error.message });
+    next(error);
+  }
+});
+
+billingRouter.put('/billing/subscriptions/:id', requireAuth, async (request, response, next) => {
+  const subscriptionId = Number(request.params.id);
+  const parsed = subscriptionSettingsSchema.safeParse(request.body);
+  if (!Number.isSafeInteger(subscriptionId) || !parsed.success) return response.status(400).json({ error: 'Revise as configurações da assinatura.' });
+  const subscription = db.prepare('SELECT * FROM billing_subscriptions WHERE id = ? AND user_id = ?').get(subscriptionId, request.user.id);
+  if (!subscription) return response.status(404).json({ error: 'Assinatura não encontrada.' });
+  const today = new Date().toISOString().slice(0, 10);
+  const nextDueDate = subscription.next_due_date && subscription.next_due_date >= today
+    ? subscription.next_due_date
+    : new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  try {
+    await asaasRequest(`/subscriptions/${encodeURIComponent(subscription.provider_subscription_id)}`, {
+      method: 'PUT',
+      body: {
+        billingType: parsed.data.billingType,
+        status: parsed.data.autoRenew ? 'ACTIVE' : 'INACTIVE',
+        ...(parsed.data.autoRenew ? { nextDueDate } : {}),
+        updatePendingPayments: true
+      }
+    });
+    db.prepare(`
+      UPDATE billing_subscriptions
+         SET billing_type = ?, auto_renew = ?, updated_at = datetime('now')
+       WHERE id = ?
+    `).run(parsed.data.billingType, Number(parsed.data.autoRenew), subscription.id);
+    auditAction(request.user.id, 'update_subscription', 'billing_subscription', subscription.id,
+      `Cliente definiu ${parsed.data.billingType} e renovação ${parsed.data.autoRenew ? 'ativa' : 'pausada'}`);
+    await syncSubscriptionPayments({ ...subscription, billing_type: parsed.data.billingType });
     response.json(customerBilling(request.user.id));
   } catch (error) {
     if (error instanceof AsaasError) return response.status(error.status >= 500 ? 502 : 400).json({ error: error.message });

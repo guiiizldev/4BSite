@@ -208,7 +208,8 @@ try {
       active: true
     })
   });
-  assert(createFoodPlan.status === 201, 'O plano mensal separado do Food nao foi criado.');
+  const foodPlanPayload = await createFoodPlan.json();
+  assert(createFoodPlan.status === 201 && foodPlanPayload.id, 'O plano mensal separado do Food nao foi criado.');
 
   const createFoodLicense = await fetch(`${baseUrl}/api/admin/licenses`, {
     method: 'POST',
@@ -247,6 +248,43 @@ try {
       sharedFoodLogin.body.companyDocument === '11222333000181',
     'A conta central nao autenticou o produto Food contratado.'
   );
+
+  database.prepare(`
+    INSERT INTO billing_subscriptions
+      (user_id, license_id, plan_id, provider_subscription_id, billing_type, status, auto_renew)
+    VALUES (?, ?, ?, 'sub_food_test_4byts', 'BOLETO', 'active', 1)
+  `).run(user.lastInsertRowid, foodLicensePayload.id, foodPlanPayload.id);
+  const customerBilling = await fetch(`${baseUrl}/api/billing`, { headers: { cookie: customerCookie } });
+  const customerBillingPayload = await customerBilling.json();
+  assert(
+    customerBilling.status === 200 && customerBillingPayload.subscriptions?.length === 2 &&
+      customerBillingPayload.subscriptions.some(subscription => subscription.product_code === 'food'),
+    'O financeiro do cliente nao separou os contratos PDV e Food.'
+  );
+
+  const accountSessions = await fetch(`${baseUrl}/api/account/sessions`, { headers: { cookie: customerCookie } });
+  const accountSessionsPayload = await accountSessions.json();
+  assert(accountSessions.status === 200 && accountSessionsPayload.sessions?.some(session => session.current), 'As sessoes da conta nao foram listadas corretamente.');
+  const rejectedProfileUpdate = await fetch(`${baseUrl}/api/account/profile`, {
+    method: 'PUT', headers: { cookie: customerCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Cliente Teste', email: 'cliente@teste.local', company: 'Empresa Atualizada', currentPassword: 'incorreta' })
+  });
+  assert(rejectedProfileUpdate.status === 401, 'A conta foi alterada sem confirmar a senha atual.');
+  const profileUpdate = await fetch(`${baseUrl}/api/account/profile`, {
+    method: 'PUT', headers: { cookie: customerCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Cliente Teste', email: 'cliente@teste.local', company: 'Empresa Atualizada', currentPassword: 'SenhaCliente123!' })
+  });
+  assert(profileUpdate.status === 200, 'A edicao segura do perfil do cliente falhou.');
+  const passwordUpdate = await fetch(`${baseUrl}/api/account/password`, {
+    method: 'PUT', headers: { cookie: customerCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ currentPassword: 'SenhaCliente123!', newPassword: 'NovaSenhaCliente123!' })
+  });
+  assert(passwordUpdate.status === 200, 'A troca de senha do cliente falhou.');
+  const loginWithNewPassword = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'cliente@teste.local', password: 'NovaSenhaCliente123!' })
+  });
+  assert(loginWithNewPassword.status === 200, 'A nova senha do cliente nao autenticou a conta.');
 
   const devicesResponse = await fetch(`${baseUrl}/api/admin/licenses/1/devices`, { headers: { cookie: adminCookie } });
   const devicesPayload = await devicesResponse.json();

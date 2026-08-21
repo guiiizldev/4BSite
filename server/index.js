@@ -137,6 +137,16 @@ const loginSchema = z.object({
 const productLoginSchema = loginSchema.extend({
   productCode: z.enum(['pdv', 'food'])
 });
+const accountProfileSchema = z.object({
+  name: z.string().trim().min(2).max(100),
+  email: z.string().trim().email().max(180).transform(value => value.toLowerCase()),
+  company: z.string().trim().max(120).optional().default(''),
+  currentPassword: z.string().min(1).max(72)
+});
+const passwordChangeSchema = z.object({
+  currentPassword: z.string().min(1).max(72),
+  newPassword: z.string().min(8).max(72)
+});
 
 const adminLicenseSchema = z.object({
   email: z.string().trim().email().optional(),
@@ -331,6 +341,51 @@ app.post('/api/auth/logout', (request, response) => {
 
 app.get('/api/auth/me', requireAuth, (request, response) => {
   response.json({ user: publicUser(request.user) });
+});
+
+app.put('/api/account/profile', requireAuth, async (request, response) => {
+  const parsed = accountProfileSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ error: 'Revise os dados da conta.' });
+  if (!await bcrypt.compare(parsed.data.currentPassword, request.user.password_hash)) {
+    return response.status(401).json({ error: 'Senha atual incorreta.' });
+  }
+  const emailOwner = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(parsed.data.email, request.user.id);
+  if (emailOwner) return response.status(409).json({ error: 'Este e-mail já pertence a outra conta.' });
+  db.prepare(`
+    UPDATE users SET name = ?, email = ?, company = ?, updated_at = datetime('now') WHERE id = ?
+  `).run(parsed.data.name, parsed.data.email, parsed.data.company || null, request.user.id);
+  auditAction(request.user.id, 'update_self', 'user', request.user.id, 'Cliente atualizou os dados da própria conta');
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(request.user.id);
+  response.json({ user: publicUser(user), message: 'Dados da conta atualizados.' });
+});
+
+app.put('/api/account/password', requireAuth, async (request, response) => {
+  const parsed = passwordChangeSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ error: 'A nova senha deve ter entre 8 e 72 caracteres.' });
+  if (!await bcrypt.compare(parsed.data.currentPassword, request.user.password_hash)) {
+    return response.status(401).json({ error: 'Senha atual incorreta.' });
+  }
+  if (await bcrypt.compare(parsed.data.newPassword, request.user.password_hash)) {
+    return response.status(409).json({ error: 'Escolha uma senha diferente da atual.' });
+  }
+  const passwordHash = await bcrypt.hash(parsed.data.newPassword, 12);
+  db.prepare("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?").run(passwordHash, request.user.id);
+  db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(request.user.id, request.user.session_id);
+  auditAction(request.user.id, 'change_password', 'user', request.user.id, 'Cliente alterou a senha da própria conta');
+  response.json({ message: 'Senha alterada. As outras sessões foram encerradas.' });
+});
+
+app.get('/api/account/sessions', requireAuth, (request, response) => {
+  const sessions = db.prepare(`
+    SELECT id, created_at AS createdAt, expires_at AS expiresAt, ip_address AS ipAddress, user_agent AS userAgent
+      FROM sessions WHERE user_id = ? ORDER BY created_at DESC
+  `).all(request.user.id).map(session => ({ ...session, current: session.id === request.user.session_id }));
+  response.json({ sessions });
+});
+
+app.delete('/api/account/sessions/others', requireAuth, (request, response) => {
+  const result = db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(request.user.id, request.user.session_id);
+  response.json({ message: `${result.changes} sessão(ões) encerrada(s).` });
 });
 
 app.get('/api/licenses', requireAuth, (request, response) => {

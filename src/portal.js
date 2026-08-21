@@ -141,12 +141,13 @@ function billingPlanForm(products = []) {
   </form>`;
 }
 
-function subscriptionForm(licenses, plans) {
+function subscriptionForm(licenses, plans, profile = {}, selectedLicenseId = null) {
   const nextDueDate = new Date().toISOString().slice(0, 10);
+  const selectedLicense = licenses.find(license => license.id === selectedLicenseId) || licenses[0];
   return `<form id="subscriptionForm" class="admin-form">
-    <label><span>Licença</span><select name="licenseId" required>${licenses.map(license => `<option value="${license.id}">${escapeHtml(license.product)} · ${escapeHtml(license.key)}</option>`).join('')}</select></label>
-    <label><span>Plano</span><select name="planId" required>${plans.map(plan => `<option value="${plan.id}">${escapeHtml(plan.name)} · ${formatMoney(plan.price_cents)}</option>`).join('')}</select></label>
-    <div class="portal-form-row"><label><span>CPF ou CNPJ</span><input name="cpfCnpj" inputmode="numeric" required></label><label><span>Celular</span><input name="phone" inputmode="tel" required></label></div>
+    <label><span>Licença</span><select id="subscriptionLicense" name="licenseId" required>${licenses.map(license => `<option value="${license.id}" data-product="${escapeHtml(license.product)}" ${license.id === selectedLicense?.id ? 'selected' : ''}>${escapeHtml(license.product)} · ${escapeHtml(license.key)}</option>`).join('')}</select></label>
+    <label><span>Plano</span><select id="subscriptionPlan" name="planId" required>${plans.map(plan => `<option value="${plan.id}" data-product="${escapeHtml(plan.product)}">${escapeHtml(plan.name)} · ${formatMoney(plan.price_cents)}</option>`).join('')}</select></label>
+    <div class="portal-form-row"><label><span>CPF ou CNPJ</span><input name="cpfCnpj" inputmode="numeric" value="${escapeHtml(profile?.cpfCnpj || '')}" required></label><label><span>Celular</span><input name="phone" inputmode="tel" value="${escapeHtml(profile?.phone || '')}" required></label></div>
     <div class="portal-form-row"><label><span>Forma de pagamento</span><select name="billingType"><option value="PIX">Pix</option><option value="BOLETO">Boleto</option></select></label><label><span>Primeiro vencimento</span><input type="date" name="nextDueDate" min="${nextDueDate}" value="${nextDueDate}" required></label></div>
     <p class="billing-note">As próximas cobranças serão geradas automaticamente conforme o ciclo do plano.</p>
     <div id="subscriptionMessage" class="portal-message" hidden></div><button class="portal-primary" type="submit">Criar assinatura <span>→</span></button>
@@ -426,7 +427,7 @@ async function adminDashboard(admin, requestedView) {
   }
 }
 
-async function dashboard() {
+async function legacyCustomerDashboard() {
   root.innerHTML = spinner();
   try {
     const { user } = await api('/api/auth/me');
@@ -532,5 +533,185 @@ async function dashboard() {
   }
 }
 
+const safeExternalUrl = value => /^https:\/\//i.test(String(value || '')) ? escapeHtml(value) : '#';
+
+function customerPaymentRows(subscriptions) {
+  const rows = subscriptions.flatMap(subscription => subscription.payments.map(payment => ({ ...payment, subscription })));
+  rows.sort((left, right) => String(right.dueDate || '').localeCompare(String(left.dueDate || '')));
+  if (!rows.length) return '<tr><td colspan="6" class="admin-empty">As cobranças aparecerão aqui assim que forem emitidas pelo Asaas.</td></tr>';
+  return rows.map(({ subscription, ...payment }) => `<tr>
+    <td><b>${escapeHtml(subscription.product)}</b><small>${escapeHtml(subscription.plan_name)}</small></td>
+    <td>${escapeHtml(formatDate(payment.dueDate))}</td>
+    <td><b>${formatMoney(payment.valueCents)}</b></td>
+    <td><span class="billing-table-status ${paidStatusesForPortal.has(payment.status) ? 'paid' : payment.status === 'OVERDUE' ? 'overdue' : ''}">${escapeHtml(paymentStatusLabel(payment.status))}</span></td>
+    <td>${payment.paidAt ? escapeHtml(formatDate(payment.paidAt)) : '—'}</td>
+    <td><div class="customer-table-actions">${payment.invoiceUrl ? `<a href="${safeExternalUrl(payment.invoiceUrl)}" target="_blank" rel="noopener">Abrir</a>` : ''}${payment.bankSlipUrl ? `<a href="${safeExternalUrl(payment.bankSlipUrl)}" target="_blank" rel="noopener">Boleto</a>` : ''}${payment.pixPayload ? `<button data-copy-payment="${escapeHtml(payment.id)}">Copiar Pix</button>` : ''}</div></td>
+  </tr>`).join('');
+}
+
+const paidStatusesForPortal = new Set(['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH']);
+
+function upcomingBilling(subscription) {
+  const realFuture = subscription.payments
+    .filter(payment => payment.dueDate && !paidStatusesForPortal.has(payment.status))
+    .sort((left, right) => left.dueDate.localeCompare(right.dueDate));
+  const entries = realFuture.slice(0, 6).map(payment => ({ date: payment.dueDate, payment }));
+  let cursor = new Date(`${subscription.next_due_date || new Date().toISOString().slice(0, 10)}T12:00:00`);
+  while (entries.length < 6) {
+    const date = cursor.toISOString().slice(0, 10);
+    if (!entries.some(entry => entry.date === date)) entries.push({ date, payment: null });
+    if (subscription.cycle === 'YEARLY') cursor.setFullYear(cursor.getFullYear() + 1);
+    else if (subscription.cycle === 'SEMIANNUALLY') cursor.setMonth(cursor.getMonth() + 6);
+    else if (subscription.cycle === 'QUARTERLY') cursor.setMonth(cursor.getMonth() + 3);
+    else cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return entries.sort((left, right) => left.date.localeCompare(right.date)).slice(0, 6).map(entry => `<article class="future-charge ${entry.payment ? 'issued' : ''}">
+    <div><small>${entry.payment ? 'FATURA EMITIDA' : 'PREVISÃO'}</small><b>${escapeHtml(formatDate(entry.date))}</b><span>${formatMoney(entry.payment?.valueCents ?? subscription.price_cents)}</span></div>
+    ${entry.payment ? `<span class="billing-table-status ${entry.payment.status === 'OVERDUE' ? 'overdue' : ''}">${escapeHtml(paymentStatusLabel(entry.payment.status))}</span>` : '<span class="future-tag">A emitir</span>'}
+  </article>`).join('');
+}
+
+async function dashboard(initialView = null) {
+  root.innerHTML = spinner();
+  try {
+    const { user } = await api('/api/auth/me');
+    if (user.role === 'admin') return adminDashboard(user);
+    const [{ licenses }, billing, planData, sessionData] = await Promise.all([
+      api('/api/licenses'), api('/api/billing'), api('/api/billing/plans'), api('/api/account/sessions')
+    ]);
+    const subscriptions = billing.subscriptions || (billing.subscription ? [{ ...billing.subscription, payments: billing.payments || [] }] : []);
+    const subscribedLicenseIds = new Set(subscriptions.map(subscription => Number(subscription.license_id)));
+    const licensesWithoutBilling = licenses.filter(license => !subscribedLicenseIds.has(Number(license.id)));
+    const activeLicenses = licenses.filter(license => license.status === 'active').length;
+    const deviceCount = licenses.reduce((total, license) => total + Number(license.deviceCount || 0), 0);
+    const overduePayments = subscriptions.flatMap(subscription => subscription.payments).filter(payment => payment.status === 'OVERDUE');
+    const openPayments = subscriptions.flatMap(subscription => subscription.payments).filter(payment => !paidStatusesForPortal.has(payment.status));
+    const nextPayment = openPayments.filter(payment => payment.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
+    const paymentRows = customerPaymentRows(subscriptions);
+    const accountStatus = overduePayments.length ? 'Atenção necessária' : 'Tudo em dia';
+
+    const contractCards = subscriptions.length ? subscriptions.map(subscription => `<article class="contract-card">
+      <div class="contract-head"><div><span class="license-product-icon">${escapeHtml(subscription.product_code?.toUpperCase() || '4B')}</span><div><small>CONTRATO #${subscription.id}</small><h3>${escapeHtml(subscription.product)}</h3></div></div><span class="billing-table-status ${subscription.billing_status === 'paid' ? 'paid' : subscription.billing_status === 'overdue' ? 'overdue' : ''}">${escapeHtml(billingStatusLabel(subscription.billing_status))}</span></div>
+      <div class="contract-details"><div><small>Plano</small><b>${escapeHtml(subscription.plan_name)}</b></div><div><small>Mensalidade</small><b>${formatMoney(subscription.price_cents)}</b></div><div><small>Pagamento</small><b>${subscription.billing_type === 'PIX' ? 'Pix' : 'Boleto'}</b></div><div><small>Renovação</small><b>${subscription.autoRenew ? 'Automática' : 'Pausada'}</b></div></div>
+      <div class="contract-footer"><span>${escapeHtml(subscription.license_key)}</span><button data-contract-settings="${subscription.id}">Configurar contrato</button></div>
+    </article>`).join('') : '<div class="admin-empty">Nenhuma cobrança recorrente configurada.</div>';
+
+    root.innerHTML = `<div class="customer-shell customer-pro-shell">
+      <aside class="customer-sidebar">
+        <a href="/" class="portal-brand">${darkLogo}</a>
+        <nav class="customer-navigation">
+          <small>MINHA CONTA</small>
+          <button data-customer-view="overview"><span>⌂</span> Visão geral</button>
+          <button data-customer-view="products"><span>◇</span> Produtos e licenças</button>
+          <button data-customer-view="billing"><span>▤</span> Financeiro</button>
+          <small>ATENDIMENTO</small>
+          <button data-customer-view="account"><span>○</span> Minha conta</button>
+          <button data-customer-view="support"><span>?</span> Suporte</button>
+        </nav>
+        <div class="sidebar-user"><span>${escapeHtml(user.name.slice(0, 2).toUpperCase())}</span><div><b>${escapeHtml(user.name)}</b><small>${escapeHtml(user.email)}</small></div></div>
+      </aside>
+      <main class="customer-main">
+        <header class="customer-header"><button class="customer-menu" aria-label="Abrir menu">☰</button><div class="customer-header-context"><small>PORTAL 4BYTS</small><b id="customerHeaderTitle">Visão geral</b></div><button id="logoutButton" class="logout-button">Sair</button></header>
+        <div class="customer-content customer-pro-content">
+          <section class="customer-page" data-customer-page="overview">
+            <div class="customer-welcome"><div><span class="portal-kicker">ÁREA DO CLIENTE</span><h1>Olá, ${escapeHtml(user.name.split(' ')[0])} 👋</h1><p>Produtos, cobranças e dados da sua empresa em um só lugar.</p></div><button class="portal-primary compact" data-go-view="billing">Ver financeiro <span>→</span></button></div>
+            <div class="customer-metrics pro-metrics"><article><span>Produtos ativos</span><strong>${activeLicenses}</strong><small>${licenses.length} contrato(s) vinculado(s)</small></article><article><span>Próximo vencimento</span><strong class="metric-date">${nextPayment ? escapeHtml(formatDate(nextPayment.dueDate)) : 'Sem fatura'}</strong><small>${nextPayment ? formatMoney(nextPayment.valueCents) : 'Nenhuma cobrança pendente'}</small></article><article><span>Status financeiro</span><strong class="${overduePayments.length ? 'account-warning' : 'account-ok'}">${accountStatus}</strong><small>${overduePayments.length ? `${overduePayments.length} fatura(s) vencida(s)` : 'nenhuma pendência vencida'}</small></article></div>
+            <div class="customer-overview-grid"><section class="customer-panel"><div class="panel-heading"><div><span class="portal-kicker">CONTRATOS</span><h2>Seus produtos 4Byts</h2></div><button data-go-view="products">Ver todos</button></div><div class="overview-products">${licenses.map(license => `<article><span class="license-product-icon">4B</span><div><b>${escapeHtml(license.product)}</b><small>${escapeHtml(license.plan)} · ${license.deviceCount}/${license.maxDevices} dispositivo(s)</small></div><span class="license-status ${escapeHtml(license.status)}">${escapeHtml(statusLabel(license.status))}</span></article>`).join('') || '<div class="admin-empty">Nenhum produto vinculado.</div>'}</div></section>
+            <section class="customer-panel next-payment-panel"><div class="panel-heading"><div><span class="portal-kicker">PRÓXIMA FATURA</span><h2>${nextPayment ? formatMoney(nextPayment.valueCents) : 'Tudo certo'}</h2></div></div>${nextPayment ? `<p>Vencimento em <b>${escapeHtml(formatDate(nextPayment.dueDate))}</b></p><div class="quick-payment-actions">${nextPayment.invoiceUrl ? `<a href="${safeExternalUrl(nextPayment.invoiceUrl)}" target="_blank" rel="noopener">Abrir fatura</a>` : ''}${nextPayment.pixPayload ? `<button data-copy-payment="${escapeHtml(nextPayment.id)}">Copiar Pix</button>` : ''}</div>` : '<p>Não existem cobranças abertas neste momento.</p>'}<button class="text-action" data-go-view="billing">Histórico financeiro →</button></section></div>
+          </section>
+
+          <section class="customer-page" data-customer-page="products" hidden>
+            <div class="customer-page-heading"><div><span class="portal-kicker">PRODUTOS</span><h1>Produtos e licenças</h1><p>Consulte chaves, instalações, planos e vencimentos.</p></div><button id="claimToggle" class="portal-primary compact">+ Vincular licença</button></div>
+            <section id="claimPanel" class="claim-panel" hidden><div><h2>Vincular uma licença</h2><p>Digite a chave recebida na contratação.</p></div><form id="claimForm"><input name="key" placeholder="4B-PDV-XXXXXX-XXXXXX" required><button type="submit">Vincular</button></form><div id="claimMessage" class="portal-message" hidden></div></section>
+            <div class="customer-license-grid pro-license-grid">${licenses.length ? licenses.map(licenseCard).join('') : '<div class="admin-empty">Nenhuma licença vinculada.</div>'}</div>
+          </section>
+
+          <section class="customer-page" data-customer-page="billing" hidden>
+            <div class="customer-page-heading"><div><span class="portal-kicker">FINANCEIRO</span><h1>Contratos e pagamentos</h1><p>Gerencie cada produto, forma de pagamento e renovação.</p></div><button id="syncAllBilling" class="admin-edit" ${subscriptions.length ? '' : 'disabled'}>Atualizar cobranças</button></div>
+            ${licensesWithoutBilling.length ? `<section class="financial-alert"><div><b>${licensesWithoutBilling.length} produto(s) sem cobrança configurada</b><p>Configure o pagamento recorrente para evitar interrupções.</p></div><button id="startSubscription" class="portal-primary compact" ${!planData.providerConfigured ? 'disabled' : ''}>Configurar agora</button></section>` : ''}
+            <div class="contract-grid">${contractCards}</div>
+            <section class="customer-panel billing-profile-panel"><div class="panel-heading"><div><span class="portal-kicker">DADOS DE COBRANÇA</span><h2>Dados do pagador</h2><p>Usados na emissão de Pix, boletos e documentos financeiros.</p></div></div><form id="billingProfileForm" class="inline-profile-form"><label><span>CPF ou CNPJ</span><input name="cpfCnpj" value="${escapeHtml(billing.profile?.cpfCnpj || '')}" inputmode="numeric" required></label><label><span>Celular</span><input name="phone" value="${escapeHtml(billing.profile?.phone || '')}" inputmode="tel" required></label><button type="submit">Salvar dados</button><div id="billingProfileMessage" class="portal-message" hidden></div></form></section>
+            <section class="customer-panel"><div class="panel-heading"><div><span class="portal-kicker">FATURAS</span><h2>Histórico e mensalidades emitidas</h2><p>Faturas futuras aparecem assim que forem geradas pelo gateway.</p></div></div><div class="admin-table-wrap"><table class="admin-table customer-billing-table"><thead><tr><th>Produto</th><th>Vencimento</th><th>Valor</th><th>Situação</th><th>Pagamento</th><th></th></tr></thead><tbody>${paymentRows}</tbody></table></div></section>
+            ${subscriptions.map(subscription => `<section class="customer-panel upcoming-panel"><div class="panel-heading"><div><span class="portal-kicker">PRÓXIMOS CICLOS</span><h2>${escapeHtml(subscription.product)}</h2><p>Cobranças emitidas podem ser pagas antecipadamente; as demais datas são previsões do contrato.</p></div></div><div class="future-charge-grid">${upcomingBilling(subscription)}</div></section>`).join('')}
+          </section>
+
+          <section class="customer-page" data-customer-page="account" hidden>
+            <div class="customer-page-heading"><div><span class="portal-kicker">MINHA CONTA</span><h1>Perfil e segurança</h1><p>Mantenha seus dados atualizados e proteja o acesso à plataforma.</p></div></div>
+            <div class="account-grid"><section class="customer-panel"><div class="panel-heading"><div><h2>Informações da conta</h2><p>A senha atual confirma alterações sensíveis.</p></div></div><form id="accountProfileForm" class="account-form"><label><span>Nome</span><input name="name" value="${escapeHtml(user.name)}" required></label><label><span>Empresa</span><input name="company" value="${escapeHtml(user.company || '')}"></label><label><span>E-mail</span><input type="email" name="email" value="${escapeHtml(user.email)}" required></label><label><span>Senha atual</span><input type="password" name="currentPassword" required></label><button type="submit">Salvar alterações</button><div id="accountProfileMessage" class="portal-message" hidden></div></form></section>
+            <section class="customer-panel"><div class="panel-heading"><div><h2>Alterar senha</h2><p>As demais sessões serão encerradas.</p></div></div><form id="passwordForm" class="account-form"><label><span>Senha atual</span><input type="password" name="currentPassword" required></label><label><span>Nova senha</span><input type="password" name="newPassword" minlength="8" required></label><label><span>Confirmar nova senha</span><input type="password" name="confirmPassword" minlength="8" required></label><button type="submit">Atualizar senha</button><div id="passwordMessage" class="portal-message" hidden></div></form></section></div>
+            <section class="customer-panel sessions-panel"><div class="panel-heading"><div><h2>Sessões conectadas</h2><p>Dispositivos que ainda possuem acesso ao portal.</p></div><button id="closeOtherSessions" class="admin-edit">Encerrar outras sessões</button></div><div class="session-list">${sessionData.sessions.map(session => `<article><span class="session-icon">${session.current ? '✓' : '○'}</span><div><b>${session.current ? 'Esta sessão' : escapeHtml((session.userAgent || 'Dispositivo desconhecido').slice(0, 80))}</b><small>IP ${escapeHtml(session.ipAddress || 'não identificado')} · criada em ${escapeHtml(formatDateTime(session.createdAt))}</small></div><span class="${session.current ? 'current-session' : ''}">${session.current ? 'Atual' : escapeHtml(formatDate(session.expiresAt))}</span></article>`).join('')}</div></section>
+          </section>
+
+          <section class="customer-page" data-customer-page="support" hidden>
+            <div class="customer-page-heading"><div><span class="portal-kicker">ATENDIMENTO</span><h1>Central de suporte</h1><p>Conte com a 4Byts para implantação, cobrança e suporte técnico.</p></div></div><div class="support-grid"><article class="support-hero"><span>SUPORTE 4BYTS</span><h2>Como podemos ajudar?</h2><p>Informe seu produto, chave da licença e uma descrição do que aconteceu para agilizar o atendimento.</p><a href="mailto:contato@4byts.com?subject=Suporte%204Byts">Abrir chamado por e-mail</a></article><article><small>COMERCIAL E COBRANÇA</small><h3>Planos e pagamentos</h3><p>Dúvidas sobre contratação, segunda via, vencimentos e renovação.</p><a href="mailto:contato@4byts.com?subject=Financeiro%204Byts">Falar com financeiro →</a></article><article><small>SUPORTE TÉCNICO</small><h3>PDV e Food</h3><p>Ajuda com instalação, acesso, máquinas autorizadas e operação.</p><a href="mailto:contato@4byts.com?subject=Suporte%20técnico%204Byts">Solicitar suporte →</a></article></div>
+          </section>
+        </div>
+      </main></div>`;
+
+    const titles = { overview: 'Visão geral', products: 'Produtos e licenças', billing: 'Financeiro', account: 'Minha conta', support: 'Suporte' };
+    const sidebar = document.querySelector('.customer-sidebar');
+    const setView = view => {
+      const selected = titles[view] ? view : 'overview';
+      document.querySelectorAll('[data-customer-page]').forEach(page => { page.hidden = page.dataset.customerPage !== selected; });
+      document.querySelectorAll('[data-customer-view]').forEach(button => button.classList.toggle('active', button.dataset.customerView === selected));
+      document.querySelector('#customerHeaderTitle').textContent = titles[selected];
+      history.replaceState(null, '', `#${selected}`);
+      sidebar.classList.remove('open');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    document.querySelectorAll('[data-customer-view]').forEach(button => button.addEventListener('click', () => setView(button.dataset.customerView)));
+    document.querySelectorAll('[data-go-view]').forEach(button => button.addEventListener('click', () => setView(button.dataset.goView)));
+    setView(initialView || location.hash.slice(1) || 'overview');
+    document.querySelector('.customer-menu').addEventListener('click', () => sidebar.classList.toggle('open'));
+    document.querySelector('#logoutButton').addEventListener('click', async () => { await api('/api/auth/logout', { method: 'POST' }); authScreen(); });
+
+    const openSubscription = selectedLicenseId => {
+      const availableLicenses = licensesWithoutBilling.length ? licensesWithoutBilling : licenses;
+      const modal = adminModal('Configurar pagamento recorrente', subscriptionForm(availableLicenses, planData.plans, billing.profile, selectedLicenseId));
+      const licenseSelect = modal.querySelector('#subscriptionLicense');
+      const planSelect = modal.querySelector('#subscriptionPlan');
+      const syncPlans = () => {
+        const product = licenseSelect.selectedOptions[0]?.dataset.product;
+        [...planSelect.options].forEach(option => { option.hidden = option.dataset.product !== product; option.disabled = option.hidden; });
+        const first = [...planSelect.options].find(option => !option.disabled);
+        if (planSelect.selectedOptions[0]?.disabled) planSelect.value = first?.value || '';
+      };
+      licenseSelect.addEventListener('change', syncPlans); syncPlans();
+      modal.querySelector('#subscriptionForm').addEventListener('submit', async event => {
+        event.preventDefault(); const form = event.currentTarget; const values = Object.fromEntries(new FormData(form)); const message = form.querySelector('#subscriptionMessage');
+        values.licenseId = Number(values.licenseId); values.planId = Number(values.planId);
+        try { await api('/api/billing/subscribe', { method: 'POST', body: JSON.stringify(values) }); modal.remove(); await dashboard('billing'); }
+        catch (error) { showMessage(message, error.message); }
+      });
+    };
+    document.querySelector('#startSubscription')?.addEventListener('click', () => openSubscription(licensesWithoutBilling[0]?.id));
+
+    document.querySelectorAll('[data-contract-settings]').forEach(button => button.addEventListener('click', () => {
+      const subscription = subscriptions.find(item => item.id === Number(button.dataset.contractSettings));
+      const modal = adminModal(`Configurar ${subscription.product}`, `<form id="contractSettingsForm" class="admin-form"><label><span>Forma de pagamento</span><select name="billingType"><option value="PIX" ${subscription.billing_type === 'PIX' ? 'selected' : ''}>Pix</option><option value="BOLETO" ${subscription.billing_type === 'BOLETO' ? 'selected' : ''}>Boleto</option></select></label><label class="renew-toggle"><input type="checkbox" name="autoRenew" ${subscription.autoRenew ? 'checked' : ''}><span><b>Renovação automática</b><small>Gera novas cobranças conforme o ciclo do plano. Pix e boleto ainda precisam ser pagos pelo cliente.</small></span></label><div id="contractSettingsMessage" class="portal-message" hidden></div><button class="portal-primary" type="submit">Salvar configurações <span>→</span></button></form>`);
+      modal.querySelector('#contractSettingsForm').addEventListener('submit', async event => {
+        event.preventDefault(); const form = event.currentTarget; const message = form.querySelector('#contractSettingsMessage'); const values = Object.fromEntries(new FormData(form)); values.autoRenew = form.elements.autoRenew.checked;
+        try { await api(`/api/billing/subscriptions/${subscription.id}`, { method: 'PUT', body: JSON.stringify(values) }); modal.remove(); await dashboard('billing'); }
+        catch (error) { showMessage(message, error.message); }
+      });
+    }));
+
+    document.querySelector('#syncAllBilling')?.addEventListener('click', async event => { event.currentTarget.disabled = true; try { await api('/api/billing/sync', { method: 'POST', body: '{}' }); await dashboard('billing'); } catch (error) { alert(error.message); event.currentTarget.disabled = false; } });
+    document.querySelectorAll('[data-copy-payment]').forEach(button => button.addEventListener('click', async () => { const payment = subscriptions.flatMap(item => item.payments).find(item => item.id === button.dataset.copyPayment); if (!payment?.pixPayload) return; await navigator.clipboard.writeText(payment.pixPayload); button.textContent = 'Pix copiado ✓'; }));
+    document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => { await navigator.clipboard.writeText(button.dataset.copy); button.textContent = 'Chave copiada ✓'; setTimeout(() => button.textContent = 'Copiar chave', 1800); }));
+
+    const claimPanel = document.querySelector('#claimPanel');
+    document.querySelector('#claimToggle')?.addEventListener('click', () => { claimPanel.hidden = !claimPanel.hidden; if (!claimPanel.hidden) claimPanel.querySelector('input').focus(); });
+    document.querySelector('#claimForm')?.addEventListener('submit', async event => { event.preventDefault(); const message = document.querySelector('#claimMessage'); const key = new FormData(event.currentTarget).get('key'); try { const result = await api('/api/licenses/claim', { method: 'POST', body: JSON.stringify({ key }) }); showMessage(message, result.message, 'success'); setTimeout(() => dashboard('products'), 700); } catch (error) { showMessage(message, error.message); } });
+    document.querySelector('#billingProfileForm')?.addEventListener('submit', async event => { event.preventDefault(); const form = event.currentTarget; const message = form.querySelector('#billingProfileMessage'); try { const result = await api('/api/billing/profile', { method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); showMessage(message, result.message, 'success'); } catch (error) { showMessage(message, error.message); } });
+    document.querySelector('#accountProfileForm')?.addEventListener('submit', async event => { event.preventDefault(); const form = event.currentTarget; const message = form.querySelector('#accountProfileMessage'); try { const result = await api('/api/account/profile', { method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); showMessage(message, result.message, 'success'); form.currentPassword.value = ''; } catch (error) { showMessage(message, error.message); } });
+    document.querySelector('#passwordForm')?.addEventListener('submit', async event => { event.preventDefault(); const form = event.currentTarget; const message = form.querySelector('#passwordMessage'); const values = Object.fromEntries(new FormData(form)); if (values.newPassword !== values.confirmPassword) return showMessage(message, 'A confirmação da nova senha não confere.'); delete values.confirmPassword; try { const result = await api('/api/account/password', { method: 'PUT', body: JSON.stringify(values) }); showMessage(message, result.message, 'success'); form.reset(); } catch (error) { showMessage(message, error.message); } });
+    document.querySelector('#closeOtherSessions')?.addEventListener('click', async () => { if (!confirm('Encerrar todas as outras sessões conectadas?')) return; const result = await api('/api/account/sessions/others', { method: 'DELETE' }); alert(result.message); await dashboard('account'); });
+  } catch (error) {
+    if (error.message.includes('login')) return authScreen();
+    root.innerHTML = `<div class="portal-fatal"><h1>Não foi possível abrir o portal</h1><p>${escapeHtml(error.message)}</p><button onclick="location.reload()">Tentar novamente</button></div>`;
+  }
+}
+
 root.innerHTML = spinner();
-api('/api/auth/me').then(dashboard).catch(() => authScreen());
+api('/api/auth/me').then(() => dashboard()).catch(() => authScreen());

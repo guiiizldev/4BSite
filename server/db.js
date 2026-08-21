@@ -95,6 +95,7 @@ db.exec(`
     provider_subscription_id TEXT UNIQUE,
     billing_type TEXT NOT NULL CHECK (billing_type IN ('PIX', 'BOLETO')),
     status TEXT NOT NULL DEFAULT 'pending',
+    auto_renew INTEGER NOT NULL DEFAULT 1 CHECK (auto_renew IN (0, 1)),
     next_due_date TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -174,6 +175,9 @@ if (!licenseColumns.has('product_code')) db.exec('ALTER TABLE licenses ADD COLUM
 
 const planColumns = new Set(db.prepare('PRAGMA table_info(billing_plans)').all().map(column => column.name));
 if (!planColumns.has('product_id')) db.exec('ALTER TABLE billing_plans ADD COLUMN product_id INTEGER REFERENCES products(id)');
+
+const subscriptionColumns = new Set(db.prepare('PRAGMA table_info(billing_subscriptions)').all().map(column => column.name));
+if (!subscriptionColumns.has('auto_renew')) db.exec('ALTER TABLE billing_subscriptions ADD COLUMN auto_renew INTEGER NOT NULL DEFAULT 1');
 
 db.prepare(`
   INSERT INTO products (code, name, license_prefix, description)
