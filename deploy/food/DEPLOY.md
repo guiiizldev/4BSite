@@ -14,6 +14,13 @@ Depois de atualizar o repositório, confirme que o PDV e o SQL Server atuais est
 cd /var/www/4byts
 git pull --ff-only origin main
 
+# Atualiza a central e cadastra o Food + plano mensal de R$ 350.
+npm ci
+npm run build
+sudo systemctl restart 4byts-api
+sudo -u www-data env DATABASE_PATH=/var/www/4byts/data/4byts.db npm run setup:food-plan
+sudo systemctl restart 4byts-api
+
 sudo install -d -m 750 -o root -g www-data /etc/4byts-food
 service_key="$(sudo sed -n 's/^LICENSE_SERVICE_API_KEY=//p' /etc/4byts/4byts-api.env | tail -n 1)"
 sql_password="$(sudo sed -n 's/^MSSQL_SA_PASSWORD=//p' /etc/4byts-pdv/sqlserver.env | tail -n 1)"
@@ -65,4 +72,4 @@ curl https://food.4byts.com/api/health
 sudo systemctl status 4byts-food-api --no-pager
 ```
 
-Na administração da 4Byts, crie um plano cujo produto seja `4Byts Food`. A chave gerada terá prefixo `4B-FOOD-` e será recusada pelo PDV comum. Da mesma forma, uma chave `4B-PDV-` será recusada pelo Food.
+O script `setup:food-plan` cadastra o produto `4Byts Food` separado do PDV e o plano `FOOD PREMIUM`, código `food-mensal`, por R$ 350,00 mensais. Ele pode ser executado novamente sem duplicar registros. A chave gerada terá prefixo `4B-FOOD-` e será recusada pelo PDV comum. Da mesma forma, uma chave `4B-PDV-` será recusada pelo Food.

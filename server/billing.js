@@ -19,10 +19,17 @@ const subscribeSchema = billingProfileSchema.extend({
 const planSchema = z.object({
   code: z.string().trim().min(2).max(40).regex(/^[a-z0-9-]+$/),
   name: z.string().trim().min(2).max(80),
-  product: z.string().trim().min(2).max(80).default('4Byts PDV'),
+  productId: z.number().int().positive(),
   priceCents: z.number().int().positive(),
   cycle: z.enum(['MONTHLY', 'QUARTERLY', 'SEMIANNUALLY', 'YEARLY']).default('MONTHLY'),
   active: z.boolean().default(true)
+});
+const productSchema = z.object({
+  code: z.string().trim().min(2).max(30).regex(/^[a-z0-9-]+$/),
+  name: z.string().trim().min(2).max(80),
+  licensePrefix: z.string().trim().min(2).max(12).regex(/^[A-Za-z0-9]+$/).transform(value => value.toUpperCase()),
+  description: z.string().trim().max(300).optional().default(''),
+  active: z.boolean().optional().default(true)
 });
 
 class AsaasError extends Error {
@@ -165,7 +172,11 @@ function customerBilling(userId) {
 export const billingRouter = Router();
 
 billingRouter.get('/billing/plans', requireAuth, (_request, response) => {
-  const plans = db.prepare('SELECT * FROM billing_plans WHERE active = 1 ORDER BY price_cents').all();
+  const plans = db.prepare(`
+    SELECT plans.*, products.code AS product_code, products.name AS product, products.license_prefix
+      FROM billing_plans plans JOIN products ON products.id = plans.product_id
+     WHERE plans.active = 1 AND products.active = 1 ORDER BY plans.price_cents
+  `).all();
   response.json({ plans, providerConfigured: asaasConfigured(), environment: process.env.ASAAS_API_URL?.includes('sandbox') || !process.env.ASAAS_API_URL ? 'sandbox' : 'production' });
 });
 
@@ -187,9 +198,15 @@ billingRouter.post('/billing/subscribe', requireAuth, async (request, response, 
   const parsed = subscribeSchema.safeParse(request.body);
   if (!parsed.success) return response.status(400).json({ error: 'Revise os dados da assinatura.' });
   const license = db.prepare('SELECT * FROM licenses WHERE id = ? AND user_id = ?').get(parsed.data.licenseId, request.user.id);
-  const plan = db.prepare('SELECT * FROM billing_plans WHERE id = ? AND active = 1').get(parsed.data.planId);
+  const plan = db.prepare(`
+    SELECT plans.*, products.code AS product_code, products.name AS product, products.license_prefix
+      FROM billing_plans plans JOIN products ON products.id = plans.product_id
+     WHERE plans.id = ? AND plans.active = 1 AND products.active = 1
+  `).get(parsed.data.planId);
   if (!license) return response.status(404).json({ error: 'Licença não encontrada.' });
   if (!plan || plan.price_cents <= 0) return response.status(409).json({ error: 'Plano indisponível para assinatura.' });
+  const licenseProductCode = license.product_code || (String(license.product).toLowerCase().includes('food') ? 'food' : 'pdv');
+  if (licenseProductCode !== plan.product_code) return response.status(409).json({ error: 'O plano selecionado pertence a outro produto.' });
   if (db.prepare('SELECT id FROM billing_subscriptions WHERE license_id = ?').get(license.id)) {
     return response.status(409).json({ error: 'Esta licença já possui uma assinatura.' });
   }
@@ -240,12 +257,42 @@ billingRouter.post('/billing/sync', requireAuth, async (request, response, next)
 
 billingRouter.get('/admin/billing/plans', requireAuth, requireAdmin, (_request, response) => {
   response.json({
-    plans: db.prepare('SELECT * FROM billing_plans ORDER BY created_at DESC').all(),
+    plans: db.prepare(`
+      SELECT plans.*, products.code AS product_code, products.name AS product, products.license_prefix
+        FROM billing_plans plans LEFT JOIN products ON products.id = plans.product_id
+       ORDER BY plans.created_at DESC
+    `).all(),
     providerConfigured: asaasConfigured(),
     environment: process.env.ASAAS_API_URL?.includes('sandbox') || !process.env.ASAAS_API_URL ? 'sandbox' : 'production',
     ipApprovalRequired: process.env.LICENSE_REQUIRE_IP_APPROVAL !== 'false',
     billingGraceDays: 5
   });
+});
+
+billingRouter.get('/admin/products', requireAuth, requireAdmin, (_request, response) => {
+  const products = db.prepare(`
+    SELECT products.*,
+      (SELECT COUNT(*) FROM billing_plans WHERE billing_plans.product_id = products.id) AS plan_count,
+      (SELECT COUNT(*) FROM licenses WHERE licenses.product_id = products.id OR (licenses.product_id IS NULL AND lower(licenses.product) = lower(products.name))) AS license_count
+    FROM products ORDER BY products.created_at
+  `).all();
+  response.json({ products });
+});
+
+billingRouter.post('/admin/products', requireAuth, requireAdmin, (request, response) => {
+  const parsed = productSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ error: 'Revise os dados do produto.' });
+  try {
+    const result = db.prepare(`
+      INSERT INTO products (code, name, license_prefix, description, active)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(parsed.data.code, parsed.data.name, parsed.data.licensePrefix, parsed.data.description, Number(parsed.data.active));
+    auditAction(request.user.id, 'create', 'product', result.lastInsertRowid, `Produto ${parsed.data.name} criado`);
+    response.status(201).json({ id: Number(result.lastInsertRowid) });
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return response.status(409).json({ error: 'Código, nome ou prefixo de licença já cadastrado.' });
+    throw error;
+  }
 });
 
 billingRouter.get('/admin/billing/subscriptions', requireAuth, requireAdmin, (_request, response) => {
@@ -267,10 +314,12 @@ billingRouter.get('/admin/billing/subscriptions', requireAuth, requireAdmin, (_r
 billingRouter.post('/admin/billing/plans', requireAuth, requireAdmin, (request, response) => {
   const parsed = planSchema.safeParse(request.body);
   if (!parsed.success) return response.status(400).json({ error: 'Revise os dados do plano.' });
+  const product = db.prepare('SELECT * FROM products WHERE id = ? AND active = 1').get(parsed.data.productId);
+  if (!product) return response.status(404).json({ error: 'Produto não encontrado ou inativo.' });
   try {
     const result = db.prepare(`
-      INSERT INTO billing_plans (code, name, product, price_cents, cycle, active) VALUES (?, ?, ?, ?, ?, ?)
-    `).run(parsed.data.code, parsed.data.name, parsed.data.product, parsed.data.priceCents, parsed.data.cycle, Number(parsed.data.active));
+      INSERT INTO billing_plans (code, name, product, product_id, price_cents, cycle, active) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(parsed.data.code, parsed.data.name, product.name, product.id, parsed.data.priceCents, parsed.data.cycle, Number(parsed.data.active));
     auditAction(request.user.id, 'create', 'billing_plan', result.lastInsertRowid, `Plano ${parsed.data.name} criado`);
     response.status(201).json({ id: Number(result.lastInsertRowid) });
   } catch (error) {

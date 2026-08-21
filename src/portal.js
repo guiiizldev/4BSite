@@ -123,10 +123,19 @@ const formatMoney = cents => new Intl.NumberFormat('pt-BR', { style: 'currency',
 const billingStatusLabel = status => ({ paid: 'Em dia', pending: 'Aguardando pagamento', overdue: 'Em atraso' }[status] || status || 'Não configurada');
 const paymentStatusLabel = status => ({ RECEIVED: 'Recebido', CONFIRMED: 'Confirmado', PENDING: 'Pendente', OVERDUE: 'Em atraso', REFUNDED: 'Estornado' }[status] || status || 'Sem cobrança');
 
-function billingPlanForm() {
+function productForm() {
+  return `<form id="productForm" class="admin-form">
+    <div class="portal-form-row"><label><span>Código interno</span><input name="code" placeholder="food" pattern="[a-z0-9-]+" required></label><label><span>Prefixo das chaves</span><input name="licensePrefix" placeholder="FOOD" pattern="[A-Za-z0-9]+" maxlength="12" required></label></div>
+    <label><span>Nome do produto</span><input name="name" placeholder="4Byts Food" required></label>
+    <label><span>Descrição</span><textarea name="description" placeholder="Sistema para restaurantes, lanchonetes e bares"></textarea></label>
+    <div id="adminFormMessage" class="portal-message" hidden></div><button class="portal-primary" type="submit">Cadastrar produto <span>→</span></button>
+  </form>`;
+}
+
+function billingPlanForm(products = []) {
   return `<form id="billingPlanForm" class="admin-form">
     <div class="portal-form-row"><label><span>Código</span><input name="code" placeholder="pdv-mensal" pattern="[a-z0-9-]+" required></label><label><span>Nome</span><input name="name" placeholder="PDV Profissional" required></label></div>
-    <label><span>Produto</span><input name="product" value="4Byts PDV" required></label>
+    <label><span>Produto</span><select name="productId" required><option value="">Selecione o produto</option>${products.filter(product => product.active).map(product => `<option value="${product.id}">${escapeHtml(product.name)} · ${escapeHtml(product.license_prefix)}</option>`).join('')}</select></label>
     <div class="portal-form-row"><label><span>Valor mensal (R$)</span><input type="number" name="price" min="1" step="0.01" placeholder="99,90" required></label><label><span>Ciclo</span><select name="cycle"><option value="MONTHLY">Mensal</option><option value="QUARTERLY">Trimestral</option><option value="SEMIANNUALLY">Semestral</option><option value="YEARLY">Anual</option></select></label></div>
     <div id="adminFormMessage" class="portal-message" hidden></div><button class="portal-primary" type="submit">Criar plano <span>→</span></button>
   </form>`;
@@ -222,16 +231,15 @@ function deviceListContent(license, devices) {
 async function adminDashboard(admin, requestedView) {
   root.innerHTML = spinner();
   try {
-    const [{ users }, { licenses }, billing, { subscriptions }, { logs }] = await Promise.all([
+    const [{ users }, { licenses }, billing, { products }, { subscriptions }, { logs }] = await Promise.all([
       api('/api/admin/users'), api('/api/admin/licenses'), api('/api/admin/billing/plans'),
-      api('/api/admin/billing/subscriptions'), api('/api/admin/audit')
+      api('/api/admin/products'), api('/api/admin/billing/subscriptions'), api('/api/admin/audit')
     ]);
     const activeLicenses = licenses.filter(license => license.status === 'active').length;
     const customers = users.filter(user => user.role === 'customer');
     const administrators = users.filter(user => user.role === 'admin');
     const customerCount = customers.length;
     const installationCount = licenses.reduce((total, license) => total + Number(license.device_count || 0), 0);
-    const products = [...new Set([...licenses.map(license => license.product), ...billing.plans.map(plan => plan.product)].filter(Boolean))];
     const userRows = selectedUsers => selectedUsers.length ? selectedUsers.map(user => `<tr><td><b>${escapeHtml(user.name)}</b><small>${escapeHtml(user.email)}</small></td><td>${escapeHtml(user.company || '—')}</td><td><span class="admin-role ${user.role}">${user.role === 'admin' ? 'Administrador' : 'Cliente'}</span></td><td>${user.license_count}</td><td><button class="admin-edit" data-edit-user="${user.id}">Editar</button></td></tr>`).join('') : '<tr><td colspan="5" class="admin-empty">Nenhuma conta encontrada.</td></tr>';
     const licenseRows = licenses.length ? licenses.map(license => `<tr><td><b class="license-key-cell">${escapeHtml(license.license_key)}</b></td><td>${license.customer_name ? `<b>${escapeHtml(license.customer_name)}</b><small>${escapeHtml(license.customer_email)}</small>` : '<span class="unassigned">Sem vínculo</span>'}</td><td><b>${escapeHtml(license.product)}</b><small>${escapeHtml(license.plan)} · ${license.max_devices} dispositivo(s)</small></td><td><span class="license-status ${escapeHtml(license.status)}">● ${escapeHtml(statusLabel(license.status))}</span></td><td><div class="admin-row-actions"><button class="admin-edit" data-devices-license="${license.id}">Instalações (${license.device_count || 0})</button><button class="admin-edit" data-edit-license="${license.id}">Editar</button></div></td></tr>`).join('') : '<tr><td colspan="5" class="admin-empty">Nenhuma licença emitida.</td></tr>';
     const planRows = billing.plans.length ? billing.plans.map(plan => `<tr><td><b>${escapeHtml(plan.name)}</b><small>${escapeHtml(plan.code)}</small></td><td>${escapeHtml(plan.product)}</td><td>${escapeHtml(plan.cycle)}</td><td><b>${formatMoney(plan.price_cents)}</b></td><td>${plan.active ? 'Ativo' : 'Inativo'}</td></tr>`).join('') : '<tr><td colspan="5" class="admin-empty">Crie o primeiro plano comercial do 4Byts PDV.</td></tr>';
@@ -278,7 +286,7 @@ async function adminDashboard(admin, requestedView) {
             <section class="admin-page" data-admin-page="installations"><div class="admin-page-heading"><div><span class="portal-kicker">SEGURANÇA</span><h1>Instalações e IPs</h1><p>Aprove máquinas, autorize novos IPs e revogue instalações.</p></div></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Licença</th><th>Cliente</th><th>Uso</th><th>Status</th><th></th></tr></thead><tbody>${installationRows}</tbody></table></div></section>
             <section class="admin-page" data-admin-page="finance"><div class="admin-page-heading"><div><span class="portal-kicker">COBRANÇAS</span><h1>Financeiro</h1><p>Central de assinaturas, meios de pagamento e inadimplência.</p></div><span class="provider-state ${billing.providerConfigured ? 'ready' : ''}">${billing.providerConfigured ? 'Asaas configurado' : 'Asaas aguardando configuração'}</span></div><div class="admin-status-grid"><article><small>Gateway</small><strong>Asaas</strong><span>${billing.providerConfigured ? 'Integração operacional' : 'Adicione as credenciais na VPS'}</span></article><article><small>Ambiente</small><strong>${billing.environment === 'production' ? 'Produção' : 'Sandbox'}</strong><span>${billing.environment === 'production' ? 'Pagamentos reais habilitados' : 'Pagamentos de homologação'}</span></article><article><small>Regra de atraso</small><strong>${billing.billingGraceDays ?? 5} dias</strong><span>Bloqueio automático no ${Number(billing.billingGraceDays ?? 5) + 1}º dia</span></article></div><section class="admin-section"><div class="licenses-heading"><div><h2>Assinaturas e pagamentos</h2><p>Situação financeira mais recente de cada cliente.</p></div></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Cliente</th><th>Plano / licença</th><th>Forma</th><th>Valor / vencimento</th><th>Situação</th></tr></thead><tbody>${subscriptionRows}</tbody></table></div></section><section class="admin-section"><div class="licenses-heading"><div><h2>Planos de cobrança</h2><p>Valores disponíveis para novas assinaturas.</p></div><button class="admin-edit" data-admin-shortcut="plans">Gerenciar planos</button></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Plano</th><th>Produto</th><th>Ciclo</th><th>Valor</th><th>Status</th></tr></thead><tbody>${planRows}</tbody></table></div></section></section>
             <section class="admin-page" data-admin-page="plans"><div class="admin-page-heading"><div><span class="portal-kicker">COMERCIAL</span><h1>Planos</h1><p>Defina preços e ciclos das assinaturas recorrentes.</p></div><button class="portal-primary compact" data-action="new-plan">+ Criar plano</button></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Plano</th><th>Produto</th><th>Ciclo</th><th>Valor</th><th>Status</th></tr></thead><tbody>${planRows}</tbody></table></div></section>
-            <section class="admin-page" data-admin-page="products"><div class="admin-page-heading"><div><span class="portal-kicker">CATÁLOGO</span><h1>Produtos</h1><p>Sistemas vinculados aos planos e licenças da plataforma.</p></div></div><div class="product-admin-grid">${products.length ? products.map(product => { const productLicenses = licenses.filter(item => item.product === product); const productPlans = billing.plans.filter(item => item.product === product); return `<article><span class="license-product-icon">4B</span><div><h2>${escapeHtml(product)}</h2><p>${productLicenses.length} licença(s) · ${productPlans.length} plano(s)</p></div><span class="provider-state ready">Disponível</span></article>`; }).join('') : '<div class="admin-empty">Os produtos aparecerão quando houver uma licença ou plano cadastrado.</div>'}</div></section>
+            <section class="admin-page" data-admin-page="products"><div class="admin-page-heading"><div><span class="portal-kicker">CATÁLOGO</span><h1>Produtos</h1><p>Cadastre cada sistema antes de criar seus planos e licenças.</p></div><button class="portal-primary compact" data-action="new-product">+ Cadastrar produto</button></div><div class="product-admin-grid">${products.length ? products.map(product => `<article><span class="license-product-icon">${escapeHtml(product.license_prefix)}</span><div><h2>${escapeHtml(product.name)}</h2><p>${escapeHtml(product.code)} · ${product.license_count} licença(s) · ${product.plan_count} plano(s)</p><small>${escapeHtml(product.description || 'Sem descrição')}</small></div><span class="provider-state ${product.active ? 'ready' : ''}">${product.active ? 'Disponível' : 'Inativo'}</span></article>`).join('') : '<div class="admin-empty">Cadastre o primeiro produto da 4Byts.</div>'}</div></section>
             <section class="admin-page" data-admin-page="administrators"><div class="admin-page-heading"><div><span class="portal-kicker">ACESSO GERAL</span><h1>Administradores</h1><p>Controle quem possui acesso completo à plataforma.</p></div><button class="portal-primary compact" data-action="new-admin">+ Criar administrador</button></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Administrador</th><th>Empresa</th><th>Permissão</th><th>Licenças</th><th></th></tr></thead><tbody>${userRows(administrators)}</tbody></table></div></section>
             <section class="admin-page" data-admin-page="settings"><div class="admin-page-heading"><div><span class="portal-kicker">SISTEMA</span><h1>Configurações</h1><p>Confira integrações, segurança e regras operacionais.</p></div></div><div class="settings-grid"><article><div><span>Pagamentos</span><h2>Integração Asaas</h2><p>Pix, boleto, recorrência e atualização por webhook.</p></div><b class="settings-state ${billing.providerConfigured ? 'ready' : ''}">${billing.providerConfigured ? 'Conectado' : 'Pendente'}</b></article><article><div><span>Licenciamento</span><h2>Aprovação de IP</h2><p>Novas máquinas e alterações de IP exigem autorização.</p></div><b class="settings-state ${billing.ipApprovalRequired !== false ? 'ready' : ''}">${billing.ipApprovalRequired !== false ? 'Ativo' : 'Inativo'}</b></article><article><div><span>Inadimplência</span><h2>Carência financeira</h2><p>A licença é bloqueada após ${billing.billingGraceDays ?? 5} dias completos de atraso.</p></div><b class="settings-state ready">${billing.billingGraceDays ?? 5} dias</b></article><article><div><span>Webhook</span><h2>Eventos do Asaas</h2><p class="settings-url">https://4byts.com/api/webhooks/asaas</p></div><b class="settings-state ${billing.providerConfigured ? 'ready' : ''}">${billing.providerConfigured ? 'Preparado' : 'Pendente'}</b></article></div></section>
             <section class="admin-page" data-admin-page="audit"><div class="admin-page-heading"><div><span class="portal-kicker">RASTREABILIDADE</span><h1>Logs e auditoria</h1><p>Histórico das ações realizadas pelos administradores.</p></div></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Evento</th><th>Responsável</th><th>Ação</th><th>Data</th></tr></thead><tbody>${auditRows}</tbody></table></div></section>
@@ -305,14 +313,30 @@ async function adminDashboard(admin, requestedView) {
     };
     document.querySelectorAll('[data-admin-view],[data-admin-shortcut]').forEach(button => button.addEventListener('click', () => setAdminView(button.dataset.adminView || button.dataset.adminShortcut)));
     setAdminView(activeView);
+    const openProduct = () => {
+      const modal = adminModal('Cadastrar produto', productForm());
+      modal.querySelector('#productForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const values = Object.fromEntries(new FormData(form));
+        const message = form.querySelector('#adminFormMessage');
+        values.active = true;
+        try {
+          await api('/api/admin/products', { method: 'POST', body: JSON.stringify(values) });
+          modal.remove();
+          await adminDashboard(admin, 'products');
+        } catch (error) { showMessage(message, error.message); }
+      });
+    };
     const openBillingPlan = () => {
-      const modal = adminModal('Criar plano de cobrança', billingPlanForm());
+      const modal = adminModal('Criar plano de cobrança', billingPlanForm(products));
       modal.querySelector('#billingPlanForm').addEventListener('submit', async event => {
         event.preventDefault();
         const form = event.currentTarget;
         const values = Object.fromEntries(new FormData(form));
         const message = form.querySelector('#adminFormMessage');
         values.priceCents = Math.round(Number(values.price) * 100);
+        values.productId = Number(values.productId);
         values.active = true;
         delete values.price;
         try {
@@ -389,6 +413,7 @@ async function adminDashboard(admin, requestedView) {
         modal.querySelector('.compact-loading').innerHTML = `<span>${escapeHtml(error.message)}</span>`;
       }
     };
+    document.querySelectorAll('[data-action="new-product"]').forEach(button => button.addEventListener('click', openProduct));
     document.querySelectorAll('[data-action="new-plan"]').forEach(button => button.addEventListener('click', openBillingPlan));
     document.querySelectorAll('[data-action="new-user"]').forEach(button => button.addEventListener('click', () => openUser()));
     document.querySelectorAll('[data-action="new-admin"]').forEach(button => button.addEventListener('click', () => openUser({ role: 'admin' })));

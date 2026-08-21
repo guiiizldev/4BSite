@@ -55,6 +55,17 @@ db.exec(`
     UNIQUE (license_id, device_id)
   );
 
+  CREATE TABLE IF NOT EXISTS products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL UNIQUE,
+    license_prefix TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS billing_plans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
@@ -158,6 +169,31 @@ const licenseColumns = new Set(db.prepare('PRAGMA table_info(licenses)').all().m
 if (!licenseColumns.has('billing_enforced')) db.exec('ALTER TABLE licenses ADD COLUMN billing_enforced INTEGER NOT NULL DEFAULT 0');
 if (!licenseColumns.has('billing_status')) db.exec("ALTER TABLE licenses ADD COLUMN billing_status TEXT NOT NULL DEFAULT 'exempt'");
 if (!licenseColumns.has('billing_grace_until')) db.exec('ALTER TABLE licenses ADD COLUMN billing_grace_until TEXT');
+if (!licenseColumns.has('product_id')) db.exec('ALTER TABLE licenses ADD COLUMN product_id INTEGER REFERENCES products(id)');
+if (!licenseColumns.has('product_code')) db.exec('ALTER TABLE licenses ADD COLUMN product_code TEXT');
+
+const planColumns = new Set(db.prepare('PRAGMA table_info(billing_plans)').all().map(column => column.name));
+if (!planColumns.has('product_id')) db.exec('ALTER TABLE billing_plans ADD COLUMN product_id INTEGER REFERENCES products(id)');
+
+db.prepare(`
+  INSERT INTO products (code, name, license_prefix, description)
+  VALUES ('pdv', '4Byts PDV', 'PDV', 'Sistema de frente de caixa e gestão comercial')
+  ON CONFLICT(code) DO UPDATE SET
+    name = excluded.name,
+    license_prefix = excluded.license_prefix,
+    description = CASE WHEN products.description = '' THEN excluded.description ELSE products.description END,
+    updated_at = datetime('now')
+`).run();
+
+db.exec(`
+  UPDATE billing_plans
+     SET product_id = (SELECT id FROM products WHERE lower(products.name) = lower(billing_plans.product))
+   WHERE product_id IS NULL;
+  UPDATE licenses
+     SET product_id = (SELECT id FROM products WHERE lower(products.name) = lower(licenses.product)),
+         product_code = COALESCE(product_code, CASE WHEN lower(product) LIKE '%pdv%' THEN 'pdv' END)
+   WHERE product_id IS NULL OR product_code IS NULL;
+`);
 
 export function cleanupExpiredSessions() {
   db.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();

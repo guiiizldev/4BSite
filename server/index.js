@@ -103,6 +103,7 @@ function licenseEntitlement(license) {
   return {
     id: license.id,
     product: license.product,
+    productCode: license.product_code || licenseProductCode(license.product),
     plan: license.plan,
     status: license.status,
     maxDevices: license.max_devices,
@@ -175,7 +176,7 @@ app.post('/api/v1/licenses/activate', activationLimiter, requireLicenseService, 
   if (!license || !license.user_id) return response.status(404).json({ error: 'Licença não encontrada ou ainda não vinculada a um cliente.' });
   const status = effectiveLicenseStatus(license);
   if (status !== 'active') return response.status(403).json({ error: `Licença ${status}.`, status });
-  const licensedProductCode = licenseProductCode(license.product);
+  const licensedProductCode = license.product_code || licenseProductCode(license.product);
   if (licensedProductCode !== parsed.data.productCode) {
     return response.status(409).json({
       error: `Esta chave pertence ao ${licenseProductLabel(licensedProductCode)} e não pode ativar o ${licenseProductLabel(parsed.data.productCode)}.`,
@@ -444,12 +445,19 @@ app.post('/api/admin/licenses', requireAuth, requireAdmin, (request, response) =
   if (!parsed.success) return response.status(400).json({ error: 'Revise os dados da licença.' });
   const user = parsed.data.email ? db.prepare('SELECT id FROM users WHERE email = ?').get(parsed.data.email.toLowerCase()) : null;
   if (parsed.data.email && !user) return response.status(404).json({ error: 'Cliente não encontrado.' });
-  const productCode = licenseProductCode(parsed.data.product).toUpperCase();
-  const key = `4B-${productCode}-${randomBytes(3).toString('hex').toUpperCase()}-${randomBytes(3).toString('hex').toUpperCase()}`;
+  const selectedPlan = db.prepare(`
+    SELECT plans.code, products.id AS product_id, products.code AS product_code,
+      products.name AS product_name, products.license_prefix
+    FROM billing_plans plans JOIN products ON products.id = plans.product_id
+    WHERE plans.code = ? AND plans.active = 1 AND products.active = 1
+  `).get(parsed.data.plan);
+  if (!selectedPlan) return response.status(404).json({ error: 'Plano ou produto não encontrado.' });
+  if (selectedPlan.product_name !== parsed.data.product) return response.status(409).json({ error: 'O plano selecionado pertence a outro produto.' });
+  const key = `4B-${selectedPlan.license_prefix}-${randomBytes(3).toString('hex').toUpperCase()}-${randomBytes(3).toString('hex').toUpperCase()}`;
   const result = db.prepare(`
-    INSERT INTO licenses (license_key, user_id, product, plan, max_devices, expires_at, activated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(key, user?.id || null, parsed.data.product, parsed.data.plan, parsed.data.maxDevices, parsed.data.expiresAt || null, user ? new Date().toISOString() : null);
+    INSERT INTO licenses (license_key, user_id, product, product_id, product_code, plan, max_devices, expires_at, activated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(key, user?.id || null, selectedPlan.product_name, selectedPlan.product_id, selectedPlan.product_code, parsed.data.plan, parsed.data.maxDevices, parsed.data.expiresAt || null, user ? new Date().toISOString() : null);
   auditAction(request.user.id, 'create', 'license', result.lastInsertRowid, `Licença ${key} criada para ${parsed.data.product}`);
   response.status(201).json({ id: Number(result.lastInsertRowid), key });
 });
@@ -458,19 +466,23 @@ app.patch('/api/admin/licenses/:id', requireAuth, requireAdmin, (request, respon
   const id = Number(request.params.id);
   const parsed = adminLicenseUpdateSchema.safeParse(request.body);
   if (!Number.isSafeInteger(id) || !parsed.success) return response.status(400).json({ error: 'Revise os dados da licença.' });
-  const existing = db.prepare('SELECT id, product FROM licenses WHERE id = ?').get(id);
+  const existing = db.prepare('SELECT id, product, product_code FROM licenses WHERE id = ?').get(id);
   if (!existing) return response.status(404).json({ error: 'Licença não encontrada.' });
-  if (licenseProductCode(existing.product) !== licenseProductCode(parsed.data.product)) {
+  const requestedProduct = db.prepare('SELECT id, code, name FROM products WHERE name = ? AND active = 1').get(parsed.data.product);
+  if (!requestedProduct) return response.status(404).json({ error: 'Produto não encontrado ou inativo.' });
+  const requestedPlan = db.prepare('SELECT id FROM billing_plans WHERE code = ? AND product_id = ? AND active = 1').get(parsed.data.plan, requestedProduct.id);
+  if (!requestedPlan) return response.status(409).json({ error: 'O plano selecionado não pertence a este produto.' });
+  if ((existing.product_code || licenseProductCode(existing.product)) !== requestedProduct.code) {
     return response.status(409).json({ error: 'O produto de uma licença emitida não pode ser alterado. Gere uma nova chave para o produto correto.' });
   }
   const normalizedEmail = parsed.data.email?.toLowerCase() || '';
   const user = normalizedEmail ? db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail) : null;
   if (normalizedEmail && !user) return response.status(404).json({ error: 'Cliente não encontrado.' });
   db.prepare(`
-    UPDATE licenses SET user_id = ?, product = ?, plan = ?, status = ?, max_devices = ?, expires_at = ?,
+    UPDATE licenses SET user_id = ?, product = ?, product_id = ?, product_code = ?, plan = ?, status = ?, max_devices = ?, expires_at = ?,
       activated_at = CASE WHEN ? IS NOT NULL THEN COALESCE(activated_at, datetime('now')) ELSE activated_at END
     WHERE id = ?
-  `).run(user?.id || null, parsed.data.product, parsed.data.plan, parsed.data.status, parsed.data.maxDevices, parsed.data.expiresAt || null, user?.id || null, id);
+  `).run(user?.id || null, requestedProduct.name, requestedProduct.id, requestedProduct.code, parsed.data.plan, parsed.data.status, parsed.data.maxDevices, parsed.data.expiresAt || null, user?.id || null, id);
   auditAction(request.user.id, 'update', 'license', id, `Licença ${id} atualizada para ${parsed.data.status}`);
   response.json({ message: 'Licença atualizada com sucesso.' });
 });

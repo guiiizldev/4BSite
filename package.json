@@ -8,6 +8,8 @@
     "dev:api": "node --watch server/index.js",
     "start:api": "node server/index.js",
     "create:admin": "node server/create-admin.js",
+    "setup:food-plan": "node scripts/seed-food-plan.js",
+    "test:food-plan": "node scripts/test-food-plan.js",
     "test:licenses": "node scripts/test-license-api.js",
     "test:ip-approval": "node scripts/test-ip-approval.js",
     "build": "vite build",

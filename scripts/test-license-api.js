@@ -182,6 +182,51 @@ try {
   const adminCookie = login.headers.get('set-cookie')?.split(';')[0];
   assert(adminCookie, 'Cookie administrativo não foi emitido.');
 
+  const createProduct = await fetch(`${baseUrl}/api/admin/products`, {
+    method: 'POST',
+    headers: { cookie: adminCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      code: 'food',
+      name: '4Byts Food',
+      licensePrefix: 'FOOD',
+      description: 'Sistema para restaurantes, lanchonetes e bares',
+      active: true
+    })
+  });
+  const productPayload = await createProduct.json();
+  assert(createProduct.status === 201 && productPayload.id, 'O cadastro separado do produto Food falhou.');
+
+  const createFoodPlan = await fetch(`${baseUrl}/api/admin/billing/plans`, {
+    method: 'POST',
+    headers: { cookie: adminCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      code: 'food-mensal',
+      name: 'FOOD PREMIUM',
+      productId: productPayload.id,
+      priceCents: 35000,
+      cycle: 'MONTHLY',
+      active: true
+    })
+  });
+  assert(createFoodPlan.status === 201, 'O plano mensal separado do Food nao foi criado.');
+
+  const createFoodLicense = await fetch(`${baseUrl}/api/admin/licenses`, {
+    method: 'POST',
+    headers: { cookie: adminCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      email: 'cliente@teste.local',
+      product: '4Byts Food',
+      plan: 'food-mensal',
+      maxDevices: 1,
+      expiresAt: null
+    })
+  });
+  const foodLicensePayload = await createFoodLicense.json();
+  assert(
+    createFoodLicense.status === 201 && foodLicensePayload.key?.startsWith('4B-FOOD-'),
+    'A licenca Food nao recebeu uma chave exclusiva do produto.'
+  );
+
   const devicesResponse = await fetch(`${baseUrl}/api/admin/licenses/1/devices`, { headers: { cookie: adminCookie } });
   const devicesPayload = await devicesResponse.json();
   assert(devicesResponse.status === 200 && devicesPayload.devices.length === 1, 'A instalação ativa não apareceu no painel.');
