@@ -56,13 +56,53 @@ public class AuthController(
         }
 
         var userAgent = Request.Headers.UserAgent.ToString();
-        var result = securityStore.Authenticate(request.Email, request.Password, ip, userAgent);
-        if (!result.Success || result.User is null || result.Session is null)
+        CentralProductLoginResult? centralLogin = null;
+        var centralUnavailable = false;
+        try
         {
-            return StatusCode(result.LockedUntil is null ? StatusCodes.Status401Unauthorized : StatusCodes.Status429TooManyRequests, new ApiResponse<object>
+            centralLogin = await licenseService.AuthenticateAsync(
+                request.Email,
+                request.Password,
+                HttpContext.RequestAborted);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            centralUnavailable = true;
+            logger.LogWarning(ex, "Central 4Byts indisponível durante o login compartilhado de {Email}.", request.Email);
+        }
+
+        if (centralLogin is { Success: false, InvalidCredentials: false })
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse<object>
             {
                 Success = false,
-                Message = result.Message,
+                Message = centralLogin.Error
+            });
+        }
+
+        if (centralLogin is { Success: false, CentralAccount: true })
+        {
+            return Unauthorized(new ApiResponse<object> { Success = false, Message = centralLogin.Error });
+        }
+
+        var result = centralLogin is { Success: true, User: not null }
+            ? securityStore.AuthenticateCentral(centralLogin.User, centralLogin.CompanyDocument, ip, userAgent)
+            : securityStore.Authenticate(request.Email, request.Password, ip, userAgent);
+        if (!result.Success || result.User is null || result.Session is null)
+        {
+            var statusCode = centralLogin?.Success == true
+                ? StatusCodes.Status409Conflict
+                : centralUnavailable
+                    ? StatusCodes.Status503ServiceUnavailable
+                    : result.LockedUntil is null
+                        ? StatusCodes.Status401Unauthorized
+                        : StatusCodes.Status429TooManyRequests;
+            return StatusCode(statusCode, new ApiResponse<object>
+            {
+                Success = false,
+                Message = centralUnavailable
+                    ? "A central 4Byts está temporariamente indisponível. Tente novamente em instantes."
+                    : result.Message,
                 Data = result.LockedUntil is null ? null : new { lockedUntil = result.LockedUntil.Value.ToString("o") }
             });
         }
@@ -70,7 +110,8 @@ public class AuthController(
         var licenseAccess = await licenseGuard.CheckAsync(result.User.CompanyId, ip, HttpContext.RequestAborted);
         if (!licenseAccess.IsAllowed)
         {
-            if (!string.IsNullOrWhiteSpace(request.LicenseKey))
+            var activationKey = centralLogin?.Success == true ? centralLogin.LicenseKey : request.LicenseKey;
+            if (!string.IsNullOrWhiteSpace(activationKey))
             {
                 var company = securityStore.GetCompanyLicenseIdentity(result.User.CompanyId);
                 if (company is null || string.IsNullOrWhiteSpace(company.Cnpj))
@@ -86,7 +127,7 @@ public class AuthController(
                 try
                 {
                     var activation = await licenseService.ActivateAsync(
-                        request.LicenseKey,
+                        activationKey,
                         GetInstallationId(company.Cnpj),
                         GetInstallationName(company.Name),
                         company.Cnpj,

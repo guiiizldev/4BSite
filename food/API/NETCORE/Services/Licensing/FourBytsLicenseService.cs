@@ -5,6 +5,46 @@ namespace HORUSPDV_API.Services.Licensing;
 
 public sealed class FourBytsLicenseService(HttpClient httpClient, FourBytsLicenseOptions options)
 {
+    public async Task<CentralProductLoginResult> AuthenticateAsync(
+        string email,
+        string password,
+        CancellationToken cancellationToken)
+    {
+        if (!options.Enabled) return CentralProductLoginResult.NotCentralAccount();
+        using var request = CreateRequest(HttpMethod.Post, "/api/v1/auth/product-login", new
+        {
+            email,
+            password,
+            productCode = options.ProductCode
+        });
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+        CentralProductLoginResponse? payload = null;
+        try { payload = JsonSerializer.Deserialize<CentralProductLoginResponse>(raw, JsonOptions); } catch (JsonException) { }
+        if (response.IsSuccessStatusCode && payload?.User is not null && payload.License is not null)
+        {
+            return new CentralProductLoginResult(
+                true,
+                false,
+                true,
+                "",
+                payload.User,
+                payload.CompanyDocument ?? "",
+                payload.LicenseKey ?? "",
+                payload.License);
+        }
+
+        return new CentralProductLoginResult(
+            false,
+            response.StatusCode is System.Net.HttpStatusCode.Unauthorized,
+            payload?.CentralAccount == true,
+            payload?.Error ?? "Não foi possível autenticar na conta 4Byts.",
+            null,
+            "",
+            "",
+            payload?.License);
+    }
+
     public async Task<LicenseActivationResult> ActivateAsync(
         string licenseKey,
         string instanceId,
@@ -77,4 +117,36 @@ public sealed class CentralLicenseResponse
     public string? Status { get; set; }
     public string? ActivationToken { get; set; }
     public CentralLicenseDto? License { get; set; }
+}
+
+public sealed class CentralProductLoginResponse
+{
+    public string? Error { get; set; }
+    public bool CentralAccount { get; set; }
+    public CentralProductUserDto? User { get; set; }
+    public string? CompanyDocument { get; set; }
+    public string? LicenseKey { get; set; }
+    public CentralLicenseDto? License { get; set; }
+}
+
+public sealed class CentralProductUserDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Company { get; set; } = string.Empty;
+}
+
+public sealed record CentralProductLoginResult(
+    bool Success,
+    bool InvalidCredentials,
+    bool CentralAccount,
+    string Error,
+    CentralProductUserDto? User,
+    string CompanyDocument,
+    string LicenseKey,
+    CentralLicenseDto? License)
+{
+    public static CentralProductLoginResult NotCentralAccount()
+        => new(false, true, false, "", null, "", "", null);
 }

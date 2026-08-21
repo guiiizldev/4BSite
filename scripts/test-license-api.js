@@ -227,6 +227,27 @@ try {
     'A licenca Food nao recebeu uma chave exclusiva do produto.'
   );
 
+  database.prepare(`
+    INSERT INTO billing_profiles (user_id, cpf_cnpj, phone) VALUES (?, ?, ?)
+  `).run(user.lastInsertRowid, '11222333000181', '11999999999');
+  const invalidSharedLogin = await post(baseUrl, '/api/v1/auth/product-login', {
+    email: 'cliente@teste.local', password: 'senha-incorreta', productCode: 'food'
+  });
+  assert(
+    invalidSharedLogin.status === 401 && invalidSharedLogin.body.centralAccount === true,
+    'O login compartilhado aceitou uma senha central incorreta.'
+  );
+  const sharedFoodLogin = await post(baseUrl, '/api/v1/auth/product-login', {
+    email: 'cliente@teste.local', password: 'SenhaCliente123!', productCode: 'food'
+  });
+  assert(
+    sharedFoodLogin.status === 200 &&
+      sharedFoodLogin.body.user?.email === 'cliente@teste.local' &&
+      sharedFoodLogin.body.licenseKey?.startsWith('4B-FOOD-') &&
+      sharedFoodLogin.body.companyDocument === '11222333000181',
+    'A conta central nao autenticou o produto Food contratado.'
+  );
+
   const devicesResponse = await fetch(`${baseUrl}/api/admin/licenses/1/devices`, { headers: { cookie: adminCookie } });
   const devicesPayload = await devicesResponse.json();
   assert(devicesResponse.status === 200 && devicesPayload.devices.length === 1, 'A instalação ativa não apareceu no painel.');

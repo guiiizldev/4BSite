@@ -134,6 +134,10 @@ const loginSchema = z.object({
   password: z.string().min(1).max(72)
 });
 
+const productLoginSchema = loginSchema.extend({
+  productCode: z.enum(['pdv', 'food'])
+});
+
 const adminLicenseSchema = z.object({
   email: z.string().trim().email().optional(),
   product: z.string().trim().min(2).max(80).default('4Byts PDV'),
@@ -253,6 +257,43 @@ app.post('/api/v1/licenses/validate', activationLimiter, requireLicenseService, 
   }
   if (status !== 'active') return response.status(403).json({ valid: false, status, license: licenseEntitlement({ ...device, status }) });
   response.json({ valid: true, license: licenseEntitlement({ ...device, status }) });
+});
+
+app.post('/api/v1/auth/product-login', activationLimiter, requireLicenseService, async (request, response) => {
+  const parsed = productLoginSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ error: 'Credenciais inválidas.' });
+  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(parsed.data.email);
+  const validPassword = user && await bcrypt.compare(parsed.data.password, user.password_hash);
+  if (!validPassword) return response.status(401).json({ error: 'E-mail ou senha inválidos.', centralAccount: Boolean(user) });
+
+  const license = db.prepare(`
+    SELECT * FROM licenses
+     WHERE user_id = ?
+       AND COALESCE(product_code, CASE WHEN lower(product) LIKE '%food%' THEN 'food' WHEN lower(product) LIKE '%pdv%' THEN 'pdv' END) = ?
+     ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, created_at DESC
+     LIMIT 1
+  `).get(user.id, parsed.data.productCode);
+  if (!license) return response.status(403).json({ error: `A conta não possui o produto ${licenseProductLabel(parsed.data.productCode)} contratado.`, status: 'product_not_contracted' });
+  const status = effectiveLicenseStatus(license);
+  if (status !== 'active') return response.status(403).json({ error: `Licença ${status}.`, status });
+
+  const billingDocument = db.prepare('SELECT cpf_cnpj FROM billing_profiles WHERE user_id = ?').get(user.id)?.cpf_cnpj || '';
+  const deviceDocument = db.prepare(`
+    SELECT devices.company_document FROM devices
+      JOIN licenses device_licenses ON device_licenses.id = devices.license_id
+     WHERE device_licenses.user_id = ? AND length(devices.company_document) = 14
+     ORDER BY devices.last_seen_at DESC LIMIT 1
+  `).get(user.id)?.company_document || '';
+  const companyDocument = String(billingDocument).replace(/\D/g, '').length === 14
+    ? String(billingDocument).replace(/\D/g, '')
+    : String(deviceDocument).replace(/\D/g, '');
+
+  response.json({
+    user: publicUser(user),
+    companyDocument,
+    licenseKey: license.license_key,
+    license: licenseEntitlement({ ...license, status })
+  });
 });
 
 app.post('/api/auth/register', authLimiter, async (request, response) => {

@@ -5,6 +5,7 @@
  */
 using HORUSPDV_API.Models.Requests;
 using HORUSPDV_API.Repositories;
+using HORUSPDV_API.Services.Licensing;
 using HORUSPDV_API.Services.Security;
 using Microsoft.Data.SqlClient;
 using System.Security.Cryptography;
@@ -236,6 +237,53 @@ public class HorusSecurityStore(Connection connection, HorusSecurityOptions secu
 
             return LoginResult.Ok(ToDto(user), session);
         }
+    }
+
+    public LoginResult AuthenticateCentral(CentralProductUserDto centralUser, string companyDocument, string ip, string userAgent)
+    {
+        var normalizedEmail = centralUser.Email.Trim().ToLowerInvariant();
+        var user = FindUserByEmail(normalizedEmail);
+        if (user is null)
+        {
+            var normalizedDocument = OnlyDigits(companyDocument);
+            if (!IsValidCnpj(normalizedDocument))
+                return LoginResult.Fail("Cadastre o CNPJ da empresa nos dados de cobrança do portal 4Byts antes do primeiro acesso ao produto.");
+
+            var companyId = $"central-company-{centralUser.Id}";
+            EnsureCompanyForCentralAccount(companyId, centralUser, normalizedDocument);
+            user = new SecurityUserRecord
+            {
+                Id = $"central-user-{centralUser.Id}", CompanyId = companyId, Cpf = normalizedDocument,
+                Name = string.IsNullOrWhiteSpace(centralUser.Name) ? centralUser.Company : centralUser.Name,
+                Email = normalizedEmail, Phone = string.Empty, Role = "administrador", Status = "ativo",
+                CreatedAt = DateTime.UtcNow.ToString("yyyy-MM-dd"), LastLoginAt = "-",
+                PasswordHash = PasswordHasher.Hash(Convert.ToHexString(RandomNumberGenerator.GetBytes(32))),
+                MustChangePassword = false
+            };
+            InsertUser(user);
+        }
+
+        if (user.Status != "ativo") return LoginResult.Fail("Este usuário está inativo neste produto 4Byts.");
+        var now = DateTimeOffset.UtcNow;
+        user.LastLoginAt = now.UtcDateTime.ToString("o");
+        var session = CreateSession(user, ip, userAgent, now);
+        using var db = connection.OpenConnection();
+        using var transaction = db.BeginTransaction();
+        try
+        {
+            using var updateUser = new SqlCommand("UPDATE Usuarios SET LastLoginAt = @LastLoginAt WHERE Id = @Id;", db, transaction);
+            updateUser.Parameters.AddWithValue("@LastLoginAt", user.LastLoginAt);
+            updateUser.Parameters.AddWithValue("@Id", user.Id);
+            updateUser.ExecuteNonQuery();
+            InsertSession(db, transaction, session);
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+        return LoginResult.Ok(ToDto(user), session);
     }
 
     public SecurityUserDto? GetActiveUser(string id)
@@ -744,6 +792,32 @@ public class HorusSecurityStore(Connection connection, HorusSecurityOptions secu
         command.Parameters.AddWithValue("@Cnpj", request.Cnpj.Trim());
         command.Parameters.AddWithValue("@Email", request.Email.Trim().ToLowerInvariant());
         command.Parameters.AddWithValue("@Phone", request.Phone.Trim());
+        command.ExecuteNonQuery();
+    }
+
+    private void EnsureCompanyForCentralAccount(string companyId, CentralProductUserDto centralUser, string companyDocument)
+    {
+        var companyName = string.IsNullOrWhiteSpace(centralUser.Company) ? centralUser.Name : centralUser.Company;
+        using var db = connection.OpenConnection();
+        using var command = new SqlCommand(
+            """
+            IF NOT EXISTS (SELECT 1 FROM Empresas WHERE Id = @Id)
+            BEGIN
+                INSERT INTO Empresas
+                    (Id, FantasyName, CorporateName, Cnpj, StateRegistration, Website, Email, SacPhone, Phone, Mobile,
+                     Cep, Address, Number, Neighborhood, City, Uf, Complement, EmailSmtpEnabled, EmailSmtpHost,
+                     EmailSmtpPort, EmailSmtpEnableSsl, EmailSmtpUser, EmailSmtpPassword, EmailSmtpFromEmail,
+                     EmailSmtpFromName, EmailSmtpReplyTo)
+                VALUES
+                    (@Id, @CompanyName, @CompanyName, @Cnpj, N'', N'', @Email, N'', N'', N'',
+                     N'', N'', N'', N'', N'', N'', N'', 0, N'smtp-mail.outlook.com',
+                     587, 1, N'', N'', N'', @CompanyName, N'');
+            END;
+            """, db);
+        command.Parameters.AddWithValue("@Id", companyId);
+        command.Parameters.AddWithValue("@CompanyName", companyName.Trim());
+        command.Parameters.AddWithValue("@Cnpj", companyDocument);
+        command.Parameters.AddWithValue("@Email", centralUser.Email.Trim().ToLowerInvariant());
         command.ExecuteNonQuery();
     }
 
