@@ -18,7 +18,7 @@ git pull --ff-only origin main
 npm ci
 npm run build
 sudo systemctl restart 4byts-api
-sudo -u www-data env DATABASE_PATH=/var/www/4byts/data/4byts.db npm run setup:food-plan
+sudo -u www-data env DATABASE_PATH=/var/lib/4byts/4byts.db npm run setup:food-plan
 sudo systemctl restart 4byts-api
 
 sudo install -d -m 750 -o root -g www-data /etc/4byts-food
