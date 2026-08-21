@@ -1,0 +1,26 @@
+# Ignore environment variables
+horuspdv-app/hpdv/backend/.env
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# macOS metadata
+.DS_Store
+
+# Tooling caches
+.eslintcache
+*.tsbuildinfo
+.vite/
+.cache/
+
+#CSharp Build output
+bin/
+obj/
+*.lscache
+
+# Upstream documentation assets are kept locally as reference only
+/docs/
+/.github/

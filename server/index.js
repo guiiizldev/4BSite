@@ -60,6 +60,19 @@ const normalizeIp = value => {
   return isIP(normalized) ? normalized : '';
 };
 
+const licenseProductCode = product => {
+  const normalized = String(product || '').trim().toLowerCase();
+  if (normalized.includes('food') || normalized.includes('restaurante') || normalized.includes('lanchonete') || normalized.includes('comanda')) return 'food';
+  if (normalized.includes('pdv')) return 'pdv';
+  return 'sys';
+};
+
+const licenseProductLabel = productCode => {
+  if (productCode === 'food') return '4Byts Food';
+  if (productCode === 'pdv') return '4Byts PDV';
+  return 'outro produto 4Byts';
+};
+
 function requireLicenseService(request, response, next) {
   const expected = process.env.LICENSE_SERVICE_API_KEY || '';
   const received = request.get('x-4byts-service-key') || '';
@@ -77,7 +90,8 @@ const activationSchema = z.object({
   instanceId: z.string().trim().min(8).max(120),
   companyName: z.string().trim().min(2).max(160),
   companyDocument: z.string().transform(digitsOnly).refine(value => value.length === 14),
-  sourceIp: z.string().trim().max(45).optional()
+  sourceIp: z.string().trim().max(45).optional(),
+  productCode: z.enum(['pdv', 'food']).optional().default('pdv')
 });
 
 const validationSchema = z.object({
@@ -161,7 +175,13 @@ app.post('/api/v1/licenses/activate', activationLimiter, requireLicenseService, 
   if (!license || !license.user_id) return response.status(404).json({ error: 'Licença não encontrada ou ainda não vinculada a um cliente.' });
   const status = effectiveLicenseStatus(license);
   if (status !== 'active') return response.status(403).json({ error: `Licença ${status}.`, status });
-  if (!license.product.toLowerCase().includes('pdv')) return response.status(409).json({ error: 'Esta licença não pertence ao 4Byts PDV.' });
+  const licensedProductCode = licenseProductCode(license.product);
+  if (licensedProductCode !== parsed.data.productCode) {
+    return response.status(409).json({
+      error: `Esta chave pertence ao ${licenseProductLabel(licensedProductCode)} e não pode ativar o ${licenseProductLabel(parsed.data.productCode)}.`,
+      status: 'wrong_product'
+    });
+  }
 
   const clientIp = normalizeIp(parsed.data.sourceIp) || normalizeIp(request.ip);
   const existing = db.prepare('SELECT * FROM devices WHERE license_id = ? AND device_id = ?').get(license.id, parsed.data.instanceId);
@@ -424,7 +444,7 @@ app.post('/api/admin/licenses', requireAuth, requireAdmin, (request, response) =
   if (!parsed.success) return response.status(400).json({ error: 'Revise os dados da licença.' });
   const user = parsed.data.email ? db.prepare('SELECT id FROM users WHERE email = ?').get(parsed.data.email.toLowerCase()) : null;
   if (parsed.data.email && !user) return response.status(404).json({ error: 'Cliente não encontrado.' });
-  const productCode = parsed.data.product.toUpperCase().includes('PDV') ? 'PDV' : 'SYS';
+  const productCode = licenseProductCode(parsed.data.product).toUpperCase();
   const key = `4B-${productCode}-${randomBytes(3).toString('hex').toUpperCase()}-${randomBytes(3).toString('hex').toUpperCase()}`;
   const result = db.prepare(`
     INSERT INTO licenses (license_key, user_id, product, plan, max_devices, expires_at, activated_at)
@@ -438,8 +458,11 @@ app.patch('/api/admin/licenses/:id', requireAuth, requireAdmin, (request, respon
   const id = Number(request.params.id);
   const parsed = adminLicenseUpdateSchema.safeParse(request.body);
   if (!Number.isSafeInteger(id) || !parsed.success) return response.status(400).json({ error: 'Revise os dados da licença.' });
-  const existing = db.prepare('SELECT id FROM licenses WHERE id = ?').get(id);
+  const existing = db.prepare('SELECT id, product FROM licenses WHERE id = ?').get(id);
   if (!existing) return response.status(404).json({ error: 'Licença não encontrada.' });
+  if (licenseProductCode(existing.product) !== licenseProductCode(parsed.data.product)) {
+    return response.status(409).json({ error: 'O produto de uma licença emitida não pode ser alterado. Gere uma nova chave para o produto correto.' });
+  }
   const normalizedEmail = parsed.data.email?.toLowerCase() || '';
   const user = normalizedEmail ? db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail) : null;
   if (normalizedEmail && !user) return response.status(404).json({ error: 'Cliente não encontrado.' });

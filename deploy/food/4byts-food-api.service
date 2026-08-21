@@ -1,0 +1,24 @@
+[Unit]
+Description=4Byts Food API
+Wants=network-online.target docker.service
+After=network-online.target docker.service 4byts-api.service 4byts-pdv-api.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/4byts-food/api
+EnvironmentFile=/etc/4byts-food/food-api.env
+ExecStart=/usr/bin/dotnet /var/www/4byts-food/api/HORUSPDV-API.dll
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

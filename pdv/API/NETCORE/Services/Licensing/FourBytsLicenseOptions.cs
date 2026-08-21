@@ -5,6 +5,7 @@ public sealed class FourBytsLicenseOptions(IConfiguration configuration, IWebHos
     public bool Enabled { get; } = bool.TryParse(configuration["Licensing:Enabled"], out var enabled) && enabled;
     public string BaseUrl { get; } = configuration["Licensing:BaseUrl"]?.TrimEnd('/') ?? "http://127.0.0.1:4310";
     public string ServiceKey { get; } = configuration["Licensing:ServiceKey"] ?? "";
+    public string ProductCode { get; } = (configuration["Licensing:ProductCode"] ?? "pdv").Trim().ToLowerInvariant();
     public int ValidationMinutes { get; } = int.TryParse(configuration["Licensing:ValidationMinutes"], out var minutes)
         ? Math.Clamp(minutes, 1, 1440)
         : 15;
@@ -19,6 +20,8 @@ public sealed class FourBytsLicenseOptions(IConfiguration configuration, IWebHos
             throw new InvalidOperationException("Licensing:BaseUrl inválida.");
         if (ServiceKey.Length < 32)
             throw new InvalidOperationException("Licensing:ServiceKey deve possuir pelo menos 32 caracteres.");
+        if (ProductCode is not ("pdv" or "food"))
+            throw new InvalidOperationException("Licensing:ProductCode deve ser 'pdv' ou 'food'.");
         if (environment.IsProduction() && !BaseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
             !BaseUrl.StartsWith("http://127.0.0.1", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("A central de licenças deve usar HTTPS ou conexão local na produção.");

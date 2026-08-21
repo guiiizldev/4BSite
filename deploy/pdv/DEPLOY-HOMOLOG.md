@@ -65,7 +65,7 @@ if [ ! -f /etc/4byts-pdv/pdv-api.env ]; then
     printf 'Auth__Issuer=4byts-pdv-api\nAuth__Audience=4byts-pdv-web\n'
     printf 'Security__EncryptionKey=%s\n' "$encryption_key"
     printf 'Security__CorsOrigins=https://pdv.4byts.com\nSecurity__TrustForwardedHeaders=true\n'
-    printf 'Licensing__Enabled=true\nLicensing__BaseUrl=http://127.0.0.1:4310\nLicensing__ServiceKey=%s\n' "$service_key"
+    printf 'Licensing__Enabled=true\nLicensing__BaseUrl=http://127.0.0.1:4310\nLicensing__ServiceKey=%s\nLicensing__ProductCode=pdv\n' "$service_key"
     printf 'Recaptcha__Enabled=false\nEmail__Enabled=false\n'
   } | sudo tee /etc/4byts-pdv/pdv-api.env >/dev/null
 fi

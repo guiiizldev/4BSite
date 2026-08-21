@@ -20,7 +20,8 @@ public sealed class FourBytsLicenseService(HttpClient httpClient, FourBytsLicens
             instanceId,
             companyName,
             companyDocument,
-            sourceIp
+            sourceIp,
+            productCode = options.ProductCode
         });
         using var response = await httpClient.SendAsync(request, cancellationToken);
         return await ReadActivationAsync(response, cancellationToken);

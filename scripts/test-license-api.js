@@ -78,6 +78,10 @@ try {
     INSERT INTO licenses (license_key, user_id, product, plan, status, max_devices)
     VALUES (?, ?, '4Byts PDV', 'Profissional', 'active', 1)
   `).run('4BYTS-TESTE-0001', user.lastInsertRowid);
+  database.prepare(`
+    INSERT INTO licenses (license_key, user_id, product, plan, status, max_devices)
+    VALUES (?, ?, '4Byts Food', 'Food Profissional', 'active', 1)
+  `).run('4B-FOOD-TESTE-0001', user.lastInsertRowid);
   const billingLicense = database.prepare(`
     INSERT INTO licenses (license_key, user_id, product, plan, status, max_devices)
     VALUES (?, ?, '4Byts PDV', 'Profissional', 'active', 1)
@@ -90,6 +94,16 @@ try {
     licenseKey: '4BYTS-TESTE-0001', instanceId: 'pdv:11222333000181', companyName: 'Empresa Teste', companyDocument: '11222333000181'
   }, 'wrong-key-with-at-least-thirty-two-characters');
   assert(unauthorized.status === 401, 'A central aceitou uma credencial de serviço incorreta.');
+
+  const pdvWithFoodKey = await post(baseUrl, '/api/v1/licenses/activate', {
+    licenseKey: '4B-FOOD-TESTE-0001', instanceId: 'food-cross-pdv', companyName: 'Empresa Teste', companyDocument: '11222333000181', productCode: 'pdv'
+  });
+  assert(pdvWithFoodKey.status === 409 && pdvWithFoodKey.body.status === 'wrong_product', 'O PDV aceitou uma chave do 4Byts Food.');
+
+  const foodWithPdvKey = await post(baseUrl, '/api/v1/licenses/activate', {
+    licenseKey: '4BYTS-TESTE-0001', instanceId: 'pdv-cross-food', companyName: 'Empresa Teste', companyDocument: '11222333000181', productCode: 'food'
+  });
+  assert(foodWithPdvKey.status === 409 && foodWithPdvKey.body.status === 'wrong_product', 'O 4Byts Food aceitou uma chave do PDV.');
 
   const activation = await post(baseUrl, '/api/v1/licenses/activate', {
     licenseKey: '4BYTS-TESTE-0001', instanceId: 'pdv:11222333000181', companyName: 'Empresa Teste', companyDocument: '11222333000181'
@@ -203,7 +217,7 @@ try {
   assert(revoked.status === 403 && revoked.body.valid === false && revoked.body.status === 'revoked', 'A revogação não bloqueou a licença.');
   database.close();
 
-  console.log('Fluxo de licenças aprovado: ativação, limite, liberação administrativa, reativação e revogação.');
+  console.log('Fluxo de licenças aprovado: produtos isolados, ativação, limite, liberação administrativa, reativação e revogação.');
 } catch (error) {
   if (serverOutput.trim()) console.error(serverOutput.trim());
   throw error;
