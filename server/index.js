@@ -62,12 +62,16 @@ const normalizeIp = value => {
 
 const licenseProductCode = product => {
   const normalized = String(product || '').trim().toLowerCase();
+  if (normalized.includes('atendimento') || normalized.includes('whatsapp') || normalized.includes('wpp') || normalized.includes('chatbot')) return 'atendimento';
   if (normalized.includes('food') || normalized.includes('restaurante') || normalized.includes('lanchonete') || normalized.includes('comanda')) return 'food';
   if (normalized.includes('pdv')) return 'pdv';
   return 'sys';
 };
 
 const licenseProductLabel = productCode => {
+  const registered = db.prepare('SELECT name FROM products WHERE code = ?').get(productCode);
+  if (registered?.name) return registered.name;
+  if (productCode === 'atendimento') return '4Byts Atendimento';
   if (productCode === 'food') return '4Byts Food';
   if (productCode === 'pdv') return '4Byts PDV';
   return 'outro produto 4Byts';
@@ -91,7 +95,7 @@ const activationSchema = z.object({
   companyName: z.string().trim().min(2).max(160),
   companyDocument: z.string().transform(digitsOnly).refine(value => value.length === 14),
   sourceIp: z.string().trim().max(45).optional(),
-  productCode: z.enum(['pdv', 'food']).optional().default('pdv')
+  productCode: z.string().trim().min(2).max(40).regex(/^[a-z0-9-]+$/).optional().default('pdv')
 });
 
 const validationSchema = z.object({
@@ -135,7 +139,11 @@ const loginSchema = z.object({
 });
 
 const productLoginSchema = loginSchema.extend({
-  productCode: z.enum(['pdv', 'food'])
+  productCode: z.string().trim().min(2).max(40).regex(/^[a-z0-9-]+$/)
+});
+const entitlementCheckSchema = z.object({
+  licenseKey: z.string().trim().min(8).max(100).transform(value => value.toUpperCase()),
+  productCode: z.string().trim().min(2).max(40).regex(/^[a-z0-9-]+$/)
 });
 const accountProfileSchema = z.object({
   name: z.string().trim().min(2).max(100),
@@ -279,7 +287,7 @@ app.post('/api/v1/auth/product-login', activationLimiter, requireLicenseService,
   const license = db.prepare(`
     SELECT * FROM licenses
      WHERE user_id = ?
-       AND COALESCE(product_code, CASE WHEN lower(product) LIKE '%food%' THEN 'food' WHEN lower(product) LIKE '%pdv%' THEN 'pdv' END) = ?
+       AND COALESCE(product_code, CASE WHEN lower(product) LIKE '%atendimento%' OR lower(product) LIKE '%whatsapp%' THEN 'atendimento' WHEN lower(product) LIKE '%food%' THEN 'food' WHEN lower(product) LIKE '%pdv%' THEN 'pdv' END) = ?
      ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, created_at DESC
      LIMIT 1
   `).get(user.id, parsed.data.productCode);
@@ -304,6 +312,18 @@ app.post('/api/v1/auth/product-login', activationLimiter, requireLicenseService,
     licenseKey: license.license_key,
     license: licenseEntitlement({ ...license, status })
   });
+});
+
+app.post('/api/v1/licenses/entitlement', activationLimiter, requireLicenseService, (request, response) => {
+  const parsed = entitlementCheckSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ error: 'Consulta de licença inválida.' });
+  const license = db.prepare('SELECT * FROM licenses WHERE license_key = ?').get(parsed.data.licenseKey);
+  if (!license) return response.status(404).json({ valid: false, status: 'not_found', error: 'Licença não encontrada.' });
+  const productCode = license.product_code || licenseProductCode(license.product);
+  if (productCode !== parsed.data.productCode) return response.status(409).json({ valid: false, status: 'wrong_product', error: 'A licença pertence a outro produto.' });
+  const status = effectiveLicenseStatus(license);
+  if (status !== 'active') return response.status(403).json({ valid: false, status, license: licenseEntitlement({ ...license, status }) });
+  response.json({ valid: true, status, license: licenseEntitlement({ ...license, status }) });
 });
 
 app.post('/api/auth/register', authLimiter, async (request, response) => {

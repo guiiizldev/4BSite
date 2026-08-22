@@ -99,12 +99,19 @@ function authScreen(mode = 'login') {
 const statusLabel = status => ({ active: 'Ativa', suspended: 'Suspensa', expired: 'Expirada', revoked: 'Revogada' }[status] || status);
 const formatDate = value => value ? new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value)) : 'Sem vencimento';
 const formatDateTime = value => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(`${value}${value.endsWith('Z') || value.includes('+') ? '' : 'Z'}`)) : '—';
+const productBadge = (product, code = '') => {
+  const normalized = `${code} ${product}`.toLowerCase();
+  if (normalized.includes('atendimento') || normalized.includes('whatsapp')) return 'WPP';
+  if (normalized.includes('food')) return 'FOOD';
+  if (normalized.includes('pdv')) return 'PDV';
+  return '4B';
+};
 
 function licenseCard(license) {
   return `
     <article class="customer-license-card">
       <div class="license-card-head">
-        <span class="license-product-icon">4B</span>
+        <span class="license-product-icon">${productBadge(license.product)}</span>
         <span class="license-status ${escapeHtml(license.status)}">● ${escapeHtml(statusLabel(license.status))}</span>
       </div>
       <span class="license-product-name">${escapeHtml(license.product)}</span>
@@ -591,7 +598,7 @@ async function dashboard(initialView = null) {
     const accountStatus = overduePayments.length ? 'Atenção necessária' : 'Tudo em dia';
 
     const contractCards = subscriptions.length ? subscriptions.map(subscription => `<article class="contract-card">
-      <div class="contract-head"><div><span class="license-product-icon">${escapeHtml(subscription.product_code?.toUpperCase() || '4B')}</span><div><small>CONTRATO #${subscription.id}</small><h3>${escapeHtml(subscription.product)}</h3></div></div><span class="billing-table-status ${subscription.billing_status === 'paid' ? 'paid' : subscription.billing_status === 'overdue' ? 'overdue' : ''}">${escapeHtml(billingStatusLabel(subscription.billing_status))}</span></div>
+      <div class="contract-head"><div><span class="license-product-icon">${productBadge(subscription.product, subscription.product_code)}</span><div><small>CONTRATO #${subscription.id}</small><h3>${escapeHtml(subscription.product)}</h3></div></div><span class="billing-table-status ${subscription.billing_status === 'paid' ? 'paid' : subscription.billing_status === 'overdue' ? 'overdue' : ''}">${escapeHtml(billingStatusLabel(subscription.billing_status))}</span></div>
       <div class="contract-details"><div><small>Plano</small><b>${escapeHtml(subscription.plan_name)}</b></div><div><small>Mensalidade</small><b>${formatMoney(subscription.price_cents)}</b></div><div><small>Pagamento</small><b>${subscription.billing_type === 'PIX' ? 'Pix' : 'Boleto'}</b></div><div><small>Renovação</small><b>${subscription.autoRenew ? 'Automática' : 'Pausada'}</b></div></div>
       <div class="contract-footer"><span>${escapeHtml(subscription.license_key)}</span><button data-contract-settings="${subscription.id}">Configurar contrato</button></div>
     </article>`).join('') : '<div class="admin-empty">Nenhuma cobrança recorrente configurada.</div>';
@@ -616,7 +623,7 @@ async function dashboard(initialView = null) {
           <section class="customer-page" data-customer-page="overview">
             <div class="customer-welcome"><div><span class="portal-kicker">ÁREA DO CLIENTE</span><h1>Olá, ${escapeHtml(user.name.split(' ')[0])} 👋</h1><p>Produtos, cobranças e dados da sua empresa em um só lugar.</p></div><button class="portal-primary compact" data-go-view="billing">Ver financeiro <span>→</span></button></div>
             <div class="customer-metrics pro-metrics"><article><span>Produtos ativos</span><strong>${activeLicenses}</strong><small>${licenses.length} contrato(s) vinculado(s)</small></article><article><span>Próximo vencimento</span><strong class="metric-date">${nextPayment ? escapeHtml(formatDate(nextPayment.dueDate)) : 'Sem fatura'}</strong><small>${nextPayment ? formatMoney(nextPayment.valueCents) : 'Nenhuma cobrança pendente'}</small></article><article><span>Status financeiro</span><strong class="${overduePayments.length ? 'account-warning' : 'account-ok'}">${accountStatus}</strong><small>${overduePayments.length ? `${overduePayments.length} fatura(s) vencida(s)` : 'nenhuma pendência vencida'}</small></article></div>
-            <div class="customer-overview-grid"><section class="customer-panel"><div class="panel-heading"><div><span class="portal-kicker">CONTRATOS</span><h2>Seus produtos 4Byts</h2></div><button data-go-view="products">Ver todos</button></div><div class="overview-products">${licenses.map(license => `<article><span class="license-product-icon">4B</span><div><b>${escapeHtml(license.product)}</b><small>${escapeHtml(license.plan)} · ${license.deviceCount}/${license.maxDevices} dispositivo(s)</small></div><span class="license-status ${escapeHtml(license.status)}">${escapeHtml(statusLabel(license.status))}</span></article>`).join('') || '<div class="admin-empty">Nenhum produto vinculado.</div>'}</div></section>
+            <div class="customer-overview-grid"><section class="customer-panel"><div class="panel-heading"><div><span class="portal-kicker">CONTRATOS</span><h2>Seus produtos 4Byts</h2></div><button data-go-view="products">Ver todos</button></div><div class="overview-products">${licenses.map(license => `<article><span class="license-product-icon">${productBadge(license.product)}</span><div><b>${escapeHtml(license.product)}</b><small>${escapeHtml(license.plan)} · ${license.deviceCount}/${license.maxDevices} dispositivo(s)</small></div><span class="license-status ${escapeHtml(license.status)}">${escapeHtml(statusLabel(license.status))}</span></article>`).join('') || '<div class="admin-empty">Nenhum produto vinculado.</div>'}</div></section>
             <section class="customer-panel next-payment-panel"><div class="panel-heading"><div><span class="portal-kicker">PRÓXIMA FATURA</span><h2>${nextPayment ? formatMoney(nextPayment.valueCents) : 'Tudo certo'}</h2></div></div>${nextPayment ? `<p>Vencimento em <b>${escapeHtml(formatDate(nextPayment.dueDate))}</b></p><div class="quick-payment-actions">${nextPayment.invoiceUrl ? `<a href="${safeExternalUrl(nextPayment.invoiceUrl)}" target="_blank" rel="noopener">Abrir fatura</a>` : ''}${nextPayment.pixPayload ? `<button data-copy-payment="${escapeHtml(nextPayment.id)}">Copiar Pix</button>` : ''}</div>` : '<p>Não existem cobranças abertas neste momento.</p>'}<button class="text-action" data-go-view="billing">Histórico financeiro →</button></section></div>
           </section>
 
@@ -643,7 +650,7 @@ async function dashboard(initialView = null) {
           </section>
 
           <section class="customer-page" data-customer-page="support" hidden>
-            <div class="customer-page-heading"><div><span class="portal-kicker">ATENDIMENTO</span><h1>Central de suporte</h1><p>Conte com a 4Byts para implantação, cobrança e suporte técnico.</p></div></div><div class="support-grid"><article class="support-hero"><span>SUPORTE 4BYTS</span><h2>Como podemos ajudar?</h2><p>Informe seu produto, chave da licença e uma descrição do que aconteceu para agilizar o atendimento.</p><a href="mailto:contato@4byts.com?subject=Suporte%204Byts">Abrir chamado por e-mail</a></article><article><small>COMERCIAL E COBRANÇA</small><h3>Planos e pagamentos</h3><p>Dúvidas sobre contratação, segunda via, vencimentos e renovação.</p><a href="mailto:contato@4byts.com?subject=Financeiro%204Byts">Falar com financeiro →</a></article><article><small>SUPORTE TÉCNICO</small><h3>PDV e Food</h3><p>Ajuda com instalação, acesso, máquinas autorizadas e operação.</p><a href="mailto:contato@4byts.com?subject=Suporte%20técnico%204Byts">Solicitar suporte →</a></article></div>
+            <div class="customer-page-heading"><div><span class="portal-kicker">ATENDIMENTO</span><h1>Central de suporte</h1><p>Conte com a 4Byts para implantação, cobrança e suporte técnico.</p></div></div><div class="support-grid"><article class="support-hero"><span>SUPORTE 4BYTS</span><h2>Como podemos ajudar?</h2><p>Informe seu produto, chave da licença e uma descrição do que aconteceu para agilizar o atendimento.</p><a href="mailto:contato@4byts.com?subject=Suporte%204Byts">Abrir chamado por e-mail</a></article><article><small>COMERCIAL E COBRANÇA</small><h3>Planos e pagamentos</h3><p>Dúvidas sobre contratação, segunda via, vencimentos e renovação.</p><a href="mailto:contato@4byts.com?subject=Financeiro%204Byts">Falar com financeiro →</a></article><article><small>SUPORTE TÉCNICO</small><h3>PDV, Food e Atendimento</h3><p>Ajuda com instalação, canais oficiais, acesso, máquinas autorizadas e operação.</p><a href="mailto:contato@4byts.com?subject=Suporte%20técnico%204Byts">Solicitar suporte →</a></article></div>
           </section>
         </div>
       </main></div>`;

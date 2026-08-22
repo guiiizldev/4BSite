@@ -249,6 +249,28 @@ try {
     'A conta central nao autenticou o produto Food contratado.'
   );
 
+  const atendimentoProductResponse = await fetch(`${baseUrl}/api/admin/products`, {
+    method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ code: 'atendimento', name: '4Byts Atendimento', licensePrefix: 'WPP', description: 'Atendimento oficial no WhatsApp', active: true })
+  });
+  const atendimentoProduct = await atendimentoProductResponse.json();
+  assert(atendimentoProductResponse.status === 201 && atendimentoProduct.id, 'O terceiro produto Atendimento nao foi criado.');
+  const atendimentoPlanResponse = await fetch(`${baseUrl}/api/admin/billing/plans`, {
+    method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ code: 'atendimento-mensal', name: 'ATENDIMENTO PROFISSIONAL', productId: atendimentoProduct.id, priceCents: 29900, cycle: 'MONTHLY', active: true })
+  });
+  assert(atendimentoPlanResponse.status === 201, 'O plano do Atendimento nao foi criado.');
+  const atendimentoLicenseResponse = await fetch(`${baseUrl}/api/admin/licenses`, {
+    method: 'POST', headers: { cookie: adminCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'cliente@teste.local', product: '4Byts Atendimento', plan: 'atendimento-mensal', maxDevices: 1, expiresAt: null })
+  });
+  const atendimentoLicense = await atendimentoLicenseResponse.json();
+  assert(atendimentoLicenseResponse.status === 201 && atendimentoLicense.key?.startsWith('4B-WPP-'), 'A chave exclusiva WPP nao foi gerada.');
+  const sharedAtendimentoLogin = await post(baseUrl, '/api/v1/auth/product-login', { email: 'cliente@teste.local', password: 'SenhaCliente123!', productCode: 'atendimento' });
+  assert(sharedAtendimentoLogin.status === 200 && sharedAtendimentoLogin.body.licenseKey === atendimentoLicense.key, 'A conta central nao autenticou no 4Byts Atendimento.');
+  const atendimentoEntitlement = await post(baseUrl, '/api/v1/licenses/entitlement', { licenseKey: atendimentoLicense.key, productCode: 'atendimento' });
+  assert(atendimentoEntitlement.status === 200 && atendimentoEntitlement.body.valid === true, 'A verificacao recorrente da licenca Atendimento falhou.');
+
   database.prepare(`
     INSERT INTO billing_subscriptions
       (user_id, license_id, plan_id, provider_subscription_id, billing_type, status, auto_renew)

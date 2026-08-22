@@ -100,6 +100,7 @@ h2 { font-size: clamp(38px,4vw,54px); line-height: 1.08; letter-spacing: -2.5px;
 .product-grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: 22px; }
 .product-card { min-height: 550px; border-radius: 20px; overflow: hidden; position: relative; padding: 45px; }
 .product-card.featured { background: #dff6ed; }.product-card.custom { background: #111817; color: white; }
+.product-card.product-ready { min-height: 440px; }.food-card { background:linear-gradient(145deg,#fff5df,#f5e6c4); }.atendimento-card { background:linear-gradient(145deg,#dff8ef,#c5eee0); }.product-card.product-ready p { max-width:510px; }.dark-link { color:var(--ink); }
 .product-copy { position: relative; z-index: 2; max-width: 350px; }.product-tag { font-size: 10px; letter-spacing: 1.2px; font-weight: 800; color: #117c5c; background: rgba(255,255,255,.6); padding: 7px 10px; border-radius: 5px; display: inline-block; }
 .product-icon { width: 54px; height: 54px; display: grid; place-items: center; color: var(--green-dark); background: white; border-radius: 12px; margin: 26px 0 20px; box-shadow: 0 10px 25px rgba(13,159,115,.12); }.product-icon .icon { width: 25px; height: 25px; }.product-icon.purple { background: #2a2346; color: #a994ff; }
 .product-card h3 { font-size: 32px; letter-spacing: -1.2px; margin: 0 0 12px; }.product-card p { color: #60716c; line-height: 1.65; }.custom p { color: #aab4b1; }

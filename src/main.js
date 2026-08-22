@@ -122,6 +122,24 @@ document.querySelector('#app').innerHTML = `
             </div>
           </article>
 
+          <article class="product-card product-ready food-card reveal delay-1">
+            <div class="product-icon">${Icon('cart')}</div>
+            <span class="product-tag">RESTAURANTES E BARES</span>
+            <h3>4Byts Food</h3>
+            <p>Comandas, mesas, cozinha e caixa integrados para uma operação rápida do pedido ao pagamento.</p>
+            <ul><li>${Icon('check')} Salão e comandas</li><li>${Icon('check')} Fluxo de cozinha</li><li>${Icon('check')} Estoque e financeiro</li></ul>
+            <a href="#contato" class="text-link dark-link">Conhecer o 4Byts Food ${Icon('arrow')}</a>
+          </article>
+
+          <article class="product-card product-ready atendimento-card reveal">
+            <div class="product-icon">${Icon('headset')}</div>
+            <span class="product-tag">ATENDIMENTO NO WHATSAPP</span>
+            <h3>4Byts Atendimento</h3>
+            <p>Bot de triagem, filas organizadas e transferência fluida para sua equipe continuar a conversa.</p>
+            <ul><li>${Icon('check')} Autoatendimento inicial</li><li>${Icon('check')} Fila por departamento</li><li>${Icon('check')} Painel para atendentes</li></ul>
+            <a href="#contato" class="text-link dark-link">Quero automatizar meu atendimento ${Icon('arrow')}</a>
+          </article>
+
           <article class="product-card custom reveal delay-1">
             <div class="product-icon purple">${Icon('code')}</div>
             <span class="product-tag purple-tag">SOB MEDIDA</span>
@@ -195,7 +213,7 @@ document.querySelector('#app').innerHTML = `
         <div><span class="kicker light">VAMOS CONSTRUIR JUNTOS?</span><h2>O próximo grande passo<br>do seu negócio <em>começa aqui.</em></h2><p>Conte o que você precisa. A primeira conversa é por nossa conta.</p></div>
         <form class="lead-form" id="leadForm">
           <div class="form-row"><label><span>Seu nome</span><input name="name" required placeholder="Como podemos chamar você?" /></label><label><span>WhatsApp</span><input name="phone" required inputmode="tel" placeholder="(00) 00000-0000" /></label></div>
-          <label><span>Como podemos ajudar?</span><select name="interest"><option>Quero conhecer o 4Byts PDV</option><option>Preciso de um sistema sob medida</option><option>Quero entender o licenciamento</option><option>Quero propor uma parceria</option></select></label>
+          <label><span>Como podemos ajudar?</span><select name="interest"><option>Quero conhecer o 4Byts PDV</option><option>Quero conhecer o 4Byts Food</option><option>Quero conhecer o 4Byts Atendimento</option><option>Preciso de um sistema sob medida</option><option>Quero entender o licenciamento</option><option>Quero propor uma parceria</option></select></label>
           <label><span>Conte um pouco sobre sua ideia</span><textarea name="message" rows="3" placeholder="Qual desafio você quer resolver?"></textarea></label>
           <button class="btn btn-white" type="submit">Enviar minha ideia ${Icon('arrow')}</button>
           <small>Ao enviar, você concorda com nossa política de privacidade.</small>
@@ -207,7 +225,7 @@ document.querySelector('#app').innerHTML = `
   <footer>
     <div class="container footer-main">
       <div class="footer-brand"><a class="brand footer-logo-card" href="#inicio" aria-label="4Byts início"><span class="official-logo official-logo--footer"><img src="/assets/logo-footer.png" alt="4Byts" /></span></a><p>Tecnologia simples.<br>Resultados extraordinários.</p></div>
-      <div><h4>Soluções</h4><a href="#solucoes">4Byts PDV</a><a href="#solucoes">Sistemas sob medida</a><a href="#licencas">Licenciamento</a></div>
+      <div><h4>Soluções</h4><a href="#solucoes">4Byts PDV</a><a href="#solucoes">4Byts Food</a><a href="#solucoes">4Byts Atendimento</a><a href="#solucoes">Sistemas sob medida</a><a href="#licencas">Licenciamento</a></div>
       <div><h4>Empresa</h4><a href="#sobre">Sobre nós</a><a href="#processo">Como trabalhamos</a><a href="#contato">Contato</a></div>
       <div><h4>Atendimento</h4><a href="mailto:contato@4byts.com">contato@4byts.com</a><a href="#contato">Falar no WhatsApp</a><span>Seg–Sex, 9h às 18h</span></div>
     </div>

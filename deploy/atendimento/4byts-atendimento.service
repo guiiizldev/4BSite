@@ -1,0 +1,22 @@
+[Unit]
+Description=4Byts Atendimento WhatsApp
+After=network.target 4byts-api.service
+Wants=4byts-api.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/4byts
+EnvironmentFile=/etc/4byts-atendimento/atendimento.env
+ExecStart=/usr/bin/node /var/www/4byts/atendimento/server/index.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/4byts-atendimento
+
+[Install]
+WantedBy=multi-user.target
