@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const databasePath = resolve(process.env.DATABASE_PATH || './data/4byts.db');
-const priceCents = Number(process.env.ATENDIMENTO_MONTHLY_PRICE_CENTS || 0);
+const priceCents = Number(process.env.ATENDIMENTO_MONTHLY_PRICE_CENTS || 7500);
 const product = {
   code: 'atendimento',
   name: '4Byts Atendimento',
@@ -88,7 +88,7 @@ try {
       price: `R$ ${(result.savedPlan.price_cents / 100).toFixed(2).replace('.', ',')}`,
       cycle: result.savedPlan.cycle
     } : null,
-    nextAction: result.savedPlan ? null : 'Defina ATENDIMENTO_MONTHLY_PRICE_CENTS para cadastrar o plano comercial.'
+    nextAction: result.savedPlan ? null : 'Informe um valor positivo em ATENDIMENTO_MONTHLY_PRICE_CENTS para reativar o plano comercial.'
   }, null, 2));
 } finally {
   database.close();

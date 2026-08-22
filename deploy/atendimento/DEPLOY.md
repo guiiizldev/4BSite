@@ -8,7 +8,7 @@ No Cloudflare, crie um registro `A` chamado `atendimento`, apontando para o mesm
 
 ## 2. Central e produto
 
-O preço ainda é uma decisão comercial. O primeiro comando cadastra apenas o produto. Para também criar o plano mensal, substitua `29900` pelo valor escolhido em centavos.
+O instalador cadastra o produto e o plano `ATENDIMENTO PROFISSIONAL` por R$ 75,00 mensais. Ele é idempotente e pode ser executado novamente sem duplicar registros.
 
 ```bash
 cd /var/www/4byts
@@ -17,10 +17,7 @@ npm ci
 npm run build
 sudo systemctl restart 4byts-api
 
-sudo -u www-data env DATABASE_PATH=/var/lib/4byts/4byts.db ATENDIMENTO_MONTHLY_PRICE_CENTS=0 npm run setup:atendimento-product
-
-# Execute esta linha somente depois de definir o preço mensal:
-# sudo -u www-data env DATABASE_PATH=/var/lib/4byts/4byts.db ATENDIMENTO_MONTHLY_PRICE_CENTS=29900 npm run setup:atendimento-product
+sudo -u www-data env DATABASE_PATH=/var/lib/4byts/4byts.db npm run setup:atendimento-product
 ```
 
 Depois que o plano existir, gere a licença pelo painel administrativo. Ela terá prefixo `4B-WPP-` e não funcionará no PDV ou Food.

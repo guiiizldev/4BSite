@@ -21,7 +21,7 @@ try {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const execution = spawnSync(process.execPath, ['scripts/seed-atendimento-product.js'], {
       cwd: process.cwd(),
-      env: { ...process.env, DATABASE_PATH: databasePath, ATENDIMENTO_MONTHLY_PRICE_CENTS: '29900' },
+      env: { ...process.env, DATABASE_PATH: databasePath },
       encoding: 'utf8'
     });
     if (execution.status !== 0) throw new Error(execution.stderr || execution.stdout || 'O cadastro do Atendimento falhou.');
@@ -37,10 +37,10 @@ try {
   if (!product || product.name !== '4Byts Atendimento' || product.license_prefix !== 'WPP' || productCount !== 1) {
     throw new Error('O produto Atendimento não foi cadastrado de forma isolada e idempotente.');
   }
-  if (!plan || plan.product_id !== product.id || plan.price_cents !== 29900 || planCount !== 1) {
+  if (!plan || plan.product_id !== product.id || plan.price_cents !== 7500 || planCount !== 1) {
     throw new Error('O plano do Atendimento não foi vinculado ao produto correto.');
   }
-  console.log('4Byts Atendimento aprovado: produto isolado, prefixo WPP e plano configurável.');
+  console.log('4Byts Atendimento aprovado: produto isolado, prefixo WPP e plano mensal de R$ 75,00.');
 } finally {
   rmSync(directory, { recursive: true, force: true });
 }
